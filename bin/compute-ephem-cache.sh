@@ -4,6 +4,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../ephemcache.config"
 
+NCORES=${NCORES:-$(nproc)}
+
 if [[ $# != 3 ]]; then
 	echo "usage: $0 <mjd> <mpcorb-tstamp> <nchunks>" >&2
 	exit -1
@@ -27,15 +29,39 @@ if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
 	micromamba activate "$ENV"
 fi
 
-rm -rf outputs/_workdir
+
+xrun() {
+	[[ $KIND == "SLURM"    ]] && { $SRUN "$@"; return; }
+	[[ $KIND == "parallel" ]] && { "$@"; return; }
+}
+
+xrun2() {
+	[[ $KIND == "SLURM"    ]] && { $SRUN --ntasks=1 --cpus-per-task=16 "$@"; return; }
+	[[ $KIND == "parallel" ]] && { "$@"; return; }
+}
+
+xbatch() {
+	NCHUNKS="$1"
+	shift
+
+	[[ $KIND == "SLURM"    ]] && { $SBATCH --array=0-$((NCHUNKS-1)) --wait "$@"; return; }
+	[[ $KIND == "parallel" ]] && {
+		export SLURM_ARRAY_TASK_COUNT=$NCHUNKS
+		seq 0 $((NCHUNKS-1)) | parallel --bar --env '*' -j$NCORES 'env SLURM_ARRAY_TASK_ID={} '"$@";
+		return;
+	}
+}
 
 # 1. extract MPCORB from the database
 # 2. chunk up MPCORB and prepare sorcha inputs
 # 3. run sorcha
 # 4. run mpsky build to generate the caches
-$SRUN                                   ./bin/get-mpcorb.py --db "$MPCDB" "$TSTAMP"
-$SRUN                                   ./bin/prepare-run.py --outdir outputs/_workdir "$MJD" outputs/catalogs/mpcorb-orbits.$TSTAMP.csv outputs/catalogs/mpcorb-colors.$TSTAMP.csv "$NCHUNKS"
-$SBATCH --array=0-$((NCHUNKS-1)) --wait ./bin/exec-sorcha.sh
-$SRUN   --ntasks=1 --cpus-per-task=16   mpsky build outputs/_workdir/out.eph.*.h5 --output "$CACHEFN.tmp" -j 16
+
+rm -rf outputs/_workdir
+
+xrun            ./bin/get-mpcorb.py --db "$MPCDB" "$TSTAMP"
+xrun            ./bin/prepare-run.py --outdir outputs/_workdir "$MJD" outputs/catalogs/mpcorb-orbits.$TSTAMP.csv outputs/catalogs/mpcorb-colors.$TSTAMP.csv "$NCHUNKS"
+xbatch $NCHUNKS ./bin/exec-sorcha.sh
+xrun2           mpsky build outputs/_workdir/out.eph.*.h5 --output "$CACHEFN.tmp" -j $NCORES
 
 mv "$CACHEFN.tmp" "$CACHEFN"

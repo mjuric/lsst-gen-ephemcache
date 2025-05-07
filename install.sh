@@ -25,6 +25,7 @@ echo "ENV='$ENV'" >> ephemcache.config
 echo "MPCDB='postgresql+psycopg2://sssc@epyc.astro.washington.edu/mpc_sbn'" >> ephemcache.config
 echo "SRUN='srun --account=rubin:default@roma'" >> ephemcache.config
 echo "SBATCH='sbatch --account=rubin:default@roma'" >> ephemcache.config
+echo "KIND='parallel'" >> ephemcache.config
 
 #
 # set up micromamba
@@ -48,7 +49,7 @@ micromamba install -c conda-forge "sbpy>=0.5.0"
 #
 # install mpsky from github
 #
-git clone git@github.com:mjuric/mpsky.git
+git clone https://github.com/mjuric/mpsky.git
 (cd mpsky && pip install -e .)
 
 #
