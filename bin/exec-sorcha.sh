@@ -10,11 +10,15 @@
 
 set -e
 
+# load configuration file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../ephemcache.config"
+
 ## set up the conda environment
-#if [[ "$CONDA_DEFAULT_ENV" != "mpsky" ]]; then
-#        eval "$(micromamba shell hook --shell bash)"
-#        micromamba activate mpsky
-#fi
+if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
+	eval "$(micromamba shell hook --shell bash)"
+	micromamba activate "$ENV"
+fi
 
 # quick sanity check, that we aren't missing tasks
 NFILES=$(ls -l outputs/_workdir/orbits-000*.csv | wc -l)
