@@ -47,7 +47,8 @@ xbatch() {
 	[[ $KIND == "SLURM"    ]] && { $SBATCH --array=0-$((NCHUNKS-1)) --wait "$@"; return; }
 	[[ $KIND == "parallel" ]] && {
 		export SLURM_ARRAY_TASK_COUNT=$NCHUNKS
-		seq 0 $((NCHUNKS-1)) | parallel --bar --env '*' -j$NCORES 'env SLURM_ARRAY_TASK_ID={} '"$@";
+		ulimit -n 4096
+		seq 0 $((NCHUNKS-1)) | parallel --halt now,fail=1 --bar --env '*' -j$NCORES 'env SLURM_ARRAY_TASK_ID={} '"$@";
 		return;
 	}
 }

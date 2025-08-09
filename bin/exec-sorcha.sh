@@ -33,16 +33,28 @@ PADDED_ID=$(printf "%05d" $SLURM_ARRAY_TASK_ID)
 # run sorcha
 sorcha run \
 	-c outputs/_workdir/eph.ini \
-	-pd outputs/_workdir/eph.db \
+	--pd outputs/_workdir/eph.db \
 	-o outputs/_workdir \
 	-t out."$PADDED_ID" \
-	-ob outputs/_workdir/orbits-"$PADDED_ID".csv \
+	--ob outputs/_workdir/orbits-"$PADDED_ID".csv \
 	-p outputs/_workdir/physical-"$PADDED_ID".csv \
-	-st out.dets."$PADDED_ID" \
-	-ew out.eph."$PADDED_ID" \
-	-ar sorcha_cache/ \
+	--st out.dets."$PADDED_ID" \
+	--ew out.eph."$PADDED_ID" \
+	--ar sorcha_cache/ \
 	-f
 
+# verify that the eph and output files have the same number of rows
+# (if they don't, it means some object was for some reason too faint)
+[ $(wc -l <"outputs/_workdir/out.eph.$PADDED_ID.csv") -eq $(wc -l <"outputs/_workdir/out.$PADDED_ID.csv") ] || { echo "ERROR: Files out.eph.$PADDED_ID.csv and out.$PADDED_ID.csv are not the same length."; exit -1; }
+
 # convert to HDF5
-CONVERT="import pandas as pd; pd.read_csv(f'outputs/_workdir/out.eph.$PADDED_ID.csv').to_hdf(f'outputs/_workdir/out.eph.$PADDED_ID.h5', key='data')"
+CONVERT=$(cat <<EOF
+import pandas as pd
+
+cols="ObjID fieldMJD_TAI Obs_Sun_x_km Obs_Sun_y_km Obs_Sun_z_km Obj_Sun_x_LTC_km Obj_Sun_y_LTC_km Obj_Sun_z_LTC_km RA_deg Dec_deg PSFMagTrue".split()
+
+pd.read_csv(f'outputs/_workdir/out.$PADDED_ID.csv')[cols].to_hdf(f'outputs/_workdir/out.eph.$PADDED_ID.h5', key='data')
+EOF
+)
+
 python -c "$CONVERT"

@@ -32,10 +32,12 @@ if __name__ == '__main__':
     # sqlite database that covers 24 hours around the requested day (MJD)
     with sqlite3.connect(f"file:configs/eph.db?mode=ro") as con:
         pointings = pd.read_sql("select * from observations", con)
-        # this generates a grid of times (approx) centered on Chilean midnight,
-        # starting in the evening of t0
-        new_times = np.linspace(0.1, 0.9, 20) + args.mjd + 4./24. + 0.5
-        pointings['observationStartMJD'] = new_times
+
+    # this generates a grid of times (approx) centered on Chilean midnight,
+    # starting in the evening of t0
+    new_times = np.linspace(0.1, 0.9, 20) + args.mjd + 4./24. + 0.5
+    pointings['observationStartMJD'] = new_times
+
     with sqlite3.connect(f"{args.outdir}/eph.db") as con:
         pointings.to_sql('observations', con)
 
