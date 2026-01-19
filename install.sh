@@ -18,6 +18,17 @@ if [[ -f ephemcache.config ]]; then
 fi
 
 #
+# check for micromamba
+#
+if ! command -v $MAMBA >/dev/null 2>&1; then
+	echo "Need mamba to work. Go install it first." 1>&2
+	echo "https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html" 1>&2
+	echo "Or override by setting the MAMBA envvar (e.g. MAMBA=mamba)." 1>&2
+	exit -1
+fi
+eval "$($MAMBA shell hook --shell bash)"
+
+#
 # write configuration file
 #
 rm -f ephemcache.config
@@ -26,25 +37,16 @@ echo "MPCDB='postgresql+psycopg2://sssc@epyc.astro.washington.edu/mpc_sbn'" >> e
 echo "SRUN='srun --account=rubin:default@roma'" >> ephemcache.config
 echo "SBATCH='sbatch --account=rubin:default@roma'" >> ephemcache.config
 echo "KIND='parallel'" >> ephemcache.config
-
-#
-# set up micromamba
-#
-if ! command -v micromamba >/dev/null 2>&1; then
-	echo "Need micromamba to work. Go install it firs." 1>&2
-	echo "https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html" 1>&2
-	exit -1
-fi
-eval "$(micromamba shell hook --shell bash)"
+echo "MAMBA='$MAMBA'" >> ephemcache.config
 
 #
 # make a new environment
 #
-micromamba create -n "$ENV" -c conda-forge sorcha fastapi pydantic pydantic-settings uvicorn starlette sqlalchemy psycopg2 --yes
-micromamba activate "$ENV"
+$MAMBA create -n "$ENV" -c conda-forge sorcha fastapi pydantic pydantic-settings uvicorn starlette sqlalchemy psycopg2 --yes
+$MAMBA activate "$ENV"
 # bug workaround for "Cannot import name 'update_default_config' from 'astropy.config.configuration'"
 # which occures in older versions of sbpy
-micromamba install -c conda-forge "sbpy>=0.5.0"
+$MAMBA install -c conda-forge "sbpy>=0.5.0"
 
 #
 # install mpsky from github

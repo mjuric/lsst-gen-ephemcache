@@ -4,7 +4,12 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/../ephemcache.config"
 
-NCORES=${NCORES:-$(nproc)}
+
+if [[ "$(uname)" == "Darwin" ]]; then
+	NCORES=${NCORES:-$(sysctl -n hw.physicalcpu)}
+else
+	NCORES=${NCORES:-$(nproc)}
+fi
 
 if [[ $# != 3 ]]; then
 	echo "usage: $0 <mjd> <mpcorb-tstamp> <nchunks>" >&2
@@ -25,8 +30,8 @@ if [[ ! -d sorcha_cache ]]; then
 fi
 
 if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
-	eval "$(micromamba shell hook --shell bash)"
-	micromamba activate "$ENV"
+	eval "$($MAMBA shell hook --shell bash)"
+	$MAMBA activate "$ENV"
 fi
 
 

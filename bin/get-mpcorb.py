@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     # The SQL query to extract mpcorb
     query = text("""
-    SELECT packed_primary_provisional_designation as "ObjID", q, e, i as inc, node, argperi as "argPeri", peri_time as "t_p_MJD_TDB",
+    SELECT unpacked_primary_provisional_designation as "ObjID", q, e, i as inc, node, argperi as "argPeri", peri_time as "t_p_MJD_TDB",
            epoch_mjd as "epochMJD_TDB", mpc_orb_jsonb->'orbit_fit_statistics'->>'arc_length_total' AS arc_length,
            h, g
     FROM mpc_orbits

@@ -16,13 +16,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ## set up the conda environment
 if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
-	eval "$(micromamba shell hook --shell bash)"
-	micromamba activate "$ENV"
+	eval "$(mamba shell hook --shell bash)"
+	$MAMBA activate "$ENV"
 fi
 
 # quick sanity check, that we aren't missing tasks
 NFILES=$(ls -l outputs/_workdir/orbits-000*.csv | wc -l)
-if [[ "$NFILES" != "$SLURM_ARRAY_TASK_COUNT" ]]; then
+if [[ $NFILES -ne $SLURM_ARRAY_TASK_COUNT ]]; then
 	echo "sanity check failed: there are $NFILES input files, but $SLURM_ARRAY_TASK_COUNT scheduled jobs." 1>&2
 	exit -1
 fi
