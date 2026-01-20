@@ -17,6 +17,8 @@ if [[ -f ephemcache.config ]]; then
 	exit -1
 fi
 
+MAMBA="${MAMBA:-micromamba}"
+
 #
 # check for micromamba
 #
