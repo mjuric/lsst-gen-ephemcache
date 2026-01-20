@@ -44,7 +44,7 @@ echo "MAMBA='$MAMBA'" >> ephemcache.config
 #
 # make a new environment
 #
-$MAMBA create -n "$ENV" -c conda-forge sorcha fastapi pydantic pydantic-settings uvicorn starlette sqlalchemy psycopg2 --yes
+$MAMBA create -n "$ENV" -c conda-forge sorcha fastapi pydantic pydantic-settings uvicorn starlette sqlalchemy psycopg2 zstandard --yes
 $MAMBA activate "$ENV"
 # bug workaround for "Cannot import name 'update_default_config' from 'astropy.config.configuration'"
 # which occures in older versions of sbpy

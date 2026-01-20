@@ -10,9 +10,16 @@ set -e
 # discoveries/observations becomes available in the MPC database.
 TSTAMP=$(date -u +"%Y-%m-%d")
 
-# Compute the MJD of the current (local time) night.
-# FIXME: this should also be made nicer (at least made sure to follow Chilean local time)
-MJD=$(echo "$(date --date="$(date +%D)" +%s) / 86400.0 + 2440587.5 - 2400000.5" | bc -l | cut -f 1 -d .)
+# Compute the MJD of the observing night at current date in Santiago.
+mjd_12noon_santiago()
+{
+    tz=America/Santiago
+    d=$(TZ=$tz date +%Y-%m-%d)
+    # date: BSD || GNU compatibility
+    e=$(TZ=$tz date -j -f "%Y-%m-%d %H:%M:%S" "$d 12:00:00" +%s 2>/dev/null || TZ=$tz date -d "$d 12:00:00" +%s)
+    awk -v e="$e" 'BEGIN{print int(e/86400 + 40587)}'
+}
+MJD=$(mjd_12noon_santiago)
 
 CACHEFN="outputs/caches/eph.$MJD.$TSTAMP.bin"
 if [[ ! -f "$CACHEFN" ]]; then
