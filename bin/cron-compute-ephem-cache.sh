@@ -5,11 +5,6 @@
 
 set -e
 
-# FIXME: right now we flip to the next version of MPCORB at UTC midnight. 
-# By ops time we'll need to flip when some number of new/updated
-# discoveries/observations becomes available in the MPC database.
-TSTAMP=$(date -u +"%Y-%m-%d")
-
 # Compute the MJD of the observing night at current date in Santiago.
 mjd_12noon_santiago()
 {
@@ -19,7 +14,20 @@ mjd_12noon_santiago()
     e=$(TZ=$tz date -j -f "%Y-%m-%d %H:%M:%S" "$d 12:00:00" +%s 2>/dev/null || TZ=$tz date -d "$d 12:00:00" +%s)
     awk -v e="$e" 'BEGIN{print int(e/86400 + 40587)}'
 }
+
+# Compute the timestamp given the MJD
+mjd_to_ymd() {
+    s=$(( ($1 - 40587) * 86400 ))
+    # date: GNU || BSD compatibility
+    date -u -d "@$s" +"%Y-%m-%d" 2>/dev/null || date -u -r "$s" +"%Y-%m-%d"
+}
+
+# FIXME: in ops, we'll want this to flip over after the MPC has processed
+# our submissions from previous night, probably closer to 5pm than Chilean
+# noon
+
 MJD=$(mjd_12noon_santiago)
+TSTAMP=$(mjd_to_ymd $MJD)
 
 CACHEFN="outputs/caches/eph.$MJD.$TSTAMP.bin"
 if [[ ! -f "$CACHEFN" ]]; then

@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ## set up the conda environment
 if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
-	eval "$(mamba shell hook --shell bash)"
+	eval "$($MAMBA shell hook --shell bash)"
 	$MAMBA activate "$ENV"
 fi
 
