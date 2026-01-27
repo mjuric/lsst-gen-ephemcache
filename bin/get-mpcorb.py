@@ -96,8 +96,9 @@ if __name__ == "__main__":
 
     print("Writing to sqlite file...")
     df.to_sql("mpc_orbits", con, if_exists="replace", index=False, chunksize=1_000, method="multi")
-    print("Creating index on designation...")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_mpcorb_designation ON mpc_orbits(designation)")
+    print("Creating index on unpacked_primary_provisional_designation and packed_primary_provisional_designation...")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mpcorb_unpacked ON mpc_orbits(unpacked_primary_provisional_designation)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_mpcorb_packed ON mpc_orbits(packed_primary_provisional_designation)")
 
     print("Running ANALYZE...")
     cur.executescript("ANALYZE;")
@@ -111,7 +112,7 @@ if __name__ == "__main__":
     print("Database created.")
 
     # store colors
-    cdf = pd.DataFrame({"ObjID":  df['unpacked_primary_provisional_designation']})
+    cdf = pd.DataFrame({"ObjID":  df['packed_primary_provisional_designation']})
     cdf['H_r'] = df["h"]
 #    cdf[['u-r', 'g-r', 'i-r', 'z-r', 'y-r']] = 0.0
     cdf['GS'] = df["g"]
@@ -119,7 +120,7 @@ if __name__ == "__main__":
 
     # store orbits for Sorcha
     odf = pd.DataFrame(dict(
-        ObjID=df['unpacked_primary_provisional_designation'], q=df["q"], e=df["e"], inc=df["i"], node=df["node"], argPeri=df["argperi"], t_p_MJD_TDB=df["peri_time"],
+        ObjID=df['packed_primary_provisional_designation'], q=df["q"], e=df["e"], inc=df["i"], node=df["node"], argPeri=df["argperi"], t_p_MJD_TDB=df["peri_time"],
         epochMJD_TDB=df["epoch_mjd"]
     ))
     odf['FORMAT'] = 'COM'
