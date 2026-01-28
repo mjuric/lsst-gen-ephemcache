@@ -21,13 +21,13 @@ def zstd_compress_file(filename: str) -> str:
     out = f"{filename}.zst"
     size = os.path.getsize(filename)
 
-    cctx = zstd.ZstdCompressor(level=12, threads=-1)
+    cctx = zstd.ZstdCompressor(level=19, threads=-1)
 
     with open(filename, "rb") as fin, open(out, "wb") as fout:
-        with cctx.stream_writer(fout) as zw:
-            with tqdm(total=size, unit="B", unit_scale=True, desc=os.path.basename(out)) as pbar:
+        with tqdm(total=size, unit="B", unit_scale=True, desc=os.path.basename(out)) as pbar:
+            with cctx.stream_writer(fout) as zw:
                 while True:
-                    chunk = fin.read(1 << 20)
+                    chunk = fin.read(1 << 20) # 1 MB
                     if not chunk:
                         break
                     zw.write(chunk)
