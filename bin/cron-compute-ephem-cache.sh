@@ -5,13 +5,16 @@
 
 set -e
 
-# Compute the MJD of the observing night at current date in Santiago.
-mjd_12noon_santiago()
+# Compute the MJD of the current observing night in Santiago. A new
+# night is defined to start at 5pm (17hrs), with the night MJD
+# being the MJD at that moment.
+get_current_night_mjd()
 {
     tz=America/Santiago
-    d=$(TZ=$tz date +%Y-%m-%d)
-    # date: BSD || GNU compatibility
-    e=$(TZ=$tz date -j -f "%Y-%m-%d %H:%M:%S" "$d 12:00:00" +%s 2>/dev/null || TZ=$tz date -d "$d 12:00:00" +%s)
+    hrs_night_begins=17
+    # date: GNU || BSD compatibility
+    d=$(TZ=$tz date -d "${hrs_night_begins} hours ago" +%Y-%m-%d 2>/dev/null || TZ=$tz date -v -${hrs_night_begins}H +%Y-%m-%d)
+    e=$(TZ=$tz date -j -f "%Y-%m-%d %H:%M:%S" "$d 00:00:00" +%s 2>/dev/null || TZ=$tz date -d "$d 00:00:00" +%s)
     awk -v e="$e" 'BEGIN{print int(e/86400 + 40587)}'
 }
 
@@ -26,7 +29,7 @@ mjd_to_ymd() {
 # our submissions from previous night, probably closer to 5pm than Chilean
 # noon
 
-MJD=$(mjd_12noon_santiago)
+MJD=$(get_current_night_mjd)
 TSTAMP=$(mjd_to_ymd $MJD)
 
 CACHEFN="outputs/caches/eph.$MJD.$TSTAMP.bin"
