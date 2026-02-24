@@ -36,12 +36,12 @@ fi
 
 
 xrun() {
-	[[ $KIND == "SLURM"    ]] && { $SRUN "$@"; return; }
+	[[ $KIND == "SLURM"    ]] && { $SRUN --mem=32G "$@"; return; }
 	[[ $KIND == "parallel" ]] && { "$@"; return; }
 }
 
 xrun2() {
-	[[ $KIND == "SLURM"    ]] && { $SRUN --ntasks=1 --cpus-per-task=16 "$@"; return; }
+	[[ $KIND == "SLURM"    ]] && { $SRUN --mem=64G --ntasks=1 --cpus-per-task=64 "$@"; return; }
 	[[ $KIND == "parallel" ]] && { "$@"; return; }
 }
 
@@ -65,7 +65,7 @@ xbatch() {
 
 rm -rf outputs/_workdir
 
-xrun            ./bin/get-mpcorb.py --db "$MPCDB" "$TSTAMP"
+xrun2           ./bin/get-mpcorb.py --db "$MPCDB" "$TSTAMP"
 xrun            ./bin/prepare-run.py --outdir outputs/_workdir "$MJD" outputs/catalogs/mpcorb-orbits.$TSTAMP.csv outputs/catalogs/mpcorb-colors.$TSTAMP.csv "$NCHUNKS"
 xbatch $NCHUNKS ./bin/exec-sorcha.sh
 xrun2           mpsky build outputs/_workdir/out.eph.*.h5 --output "$CACHEFN.tmp" -j $NCORES

@@ -10,8 +10,14 @@
 
 set -e
 
-# load configuration file
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# load configuration file. The complexity here is because SLURM
+# copies our script to a temporary directory (and then we should
+# use the $SLURM_SUBMIT_DIR variable to find it again).
+if [[ -z "$SLURM_SUBMIT_DIR" ]]; then
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+	SCRIPT_DIR="$SLURM_SUBMIT_DIR/bin"
+fi
 . "$SCRIPT_DIR/../ephemcache.config"
 
 ## set up the conda environment

@@ -32,6 +32,11 @@ mjd_to_ymd() {
 MJD=$(get_current_night_mjd)
 TSTAMP=$(mjd_to_ymd $MJD)
 
+# --- timing start ---
+start_epoch=$(date +%s)
+start_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+echo "=== START ${start_iso} ==="
+
 CACHEFN="outputs/caches/eph.$MJD.$TSTAMP.bin"
 if [[ ! -f "$CACHEFN" ]]; then
 	echo "Computing ephem cache $CACHEFN"
@@ -39,3 +44,17 @@ if [[ ! -f "$CACHEFN" ]]; then
 else
 	echo "$CACHEFN: cache for $MJD (with $TSTAMP MPCORB) found; skipping."
 fi
+
+# rsync somewhere, if EPHEM_RSYNC_TO is set
+if [[ ! -z "$EPHEM_RSYNC_TO" ]]; then 
+	echo "Rsyncing to data.mpsky.org ..."
+	rsync -avzq --no-perms --no-owner --no-group -e "ssh -i ~/.ssh/id_ed25519" --exclude _workdir/ ./outputs/ "$EPHEM_RSYNC_TO" && echo "done."
+fi
+
+# --- timing end ---
+end_epoch=$(date +%s)
+end_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+elapsed=$((end_epoch - start_epoch))
+
+printf "=== END   %s ===\n" "$end_iso"
+printf "=== ELAPSED %02d:%02d:%02d (%d s) ===\n" $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60)) "$elapsed"
