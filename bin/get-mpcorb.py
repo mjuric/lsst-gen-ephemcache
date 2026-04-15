@@ -63,12 +63,21 @@ if __name__ == "__main__":
         # Set encoding to UTF-8
         dbapi_conn.set_client_encoding("UTF8")
 
-    # The SQL query to extract the full mpc_orbits table
+    # The SQL query to extract the mpc_orbits table
     query = text("""
     SELECT unpacked_primary_provisional_designation as designation, *
     FROM mpc_orbits
     WHERE NOT mpc_orb_jsonb->'orbit_fit_statistics'->>'arc_length_total' IN ('0 days', '1 days', '2 days')
+    AND NOT (unpacked_primary_provisional_designation LIKE '%/%' OR packed_primary_provisional_designation LIKE '\\_%')
+    AND q IS NOT NULL
+    AND e IS NOT NULL
+    AND i IS NOT NULL
+    AND node IS NOT NULL
+    AND argperi IS NOT NULL
+    AND peri_time IS NOT NULL
     """)
+
+#    AND NOT (packed_primary_provisional_designation LIKE 'PL%' OR packed_primary_provisional_designation LIKE 'T%')
 
     # Execute query and load results into pandas DataFrame
     print("Querying remote db for the catalog...")
