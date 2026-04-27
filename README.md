@@ -1,4 +1,4 @@
-# Ephgemerides Cache Generator scripts for LSST Operations
+# Ephemerides Cache Generator scripts for LSST Operations
 
 ## Overview
 
@@ -10,6 +10,11 @@ prompt processing pipelines.
 These caches are typically built at least once a day, usually in the
 evening, in preparation for the next night's run. They're intented to be
 triggered from something like `cron`.
+
+> **Operating this in production?** See [OPERATIONS.md](OPERATIONS.md) for
+> the USDF runbook covering the backend cron setup on `sdfcron001`, the
+> Phalanx-deployed `mpsky` pod, and routine tasks (manual rebuilds,
+> datastore cut-over, image rebuild, dev → prod promotion).
 
 ## Installation
 
@@ -24,9 +29,11 @@ which will hold all the necessary software (most notably `sorcha` and
 `mpsky`). 
 
 The install script will generate an `ephemcache.config` file that configures
-the way in which to submit jobs to a SLURM batch system.  The SLURM configuration
-should work out-of-the-box for USDF (if it doesn't let us know; it's a bug). 
-Adjust it for other clusters.
+the way in which to submit jobs to a SLURM batch system. The SLURM
+configuration written by `install.sh` does **not** match the current USDF
+cluster (partition / account / MPC DB host have all changed since
+`install.sh` was last updated); see [OPERATIONS.md §2.2](OPERATIONS.md#22-installing-or-reinstalling-the-backend)
+for the actual values to use at USDF. Adjust it for other clusters.
 
 This file also contains the connection string for the upstream MPC database;
 make sure you have the credentials for it set in your `~/.pgpass`.
