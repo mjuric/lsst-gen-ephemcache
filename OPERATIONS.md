@@ -1,21 +1,70 @@
 # Operating the Rubin Solar System Ephemerides Service
 
-This runbook covers operating the Rubin Solar System ephemerides service
-(`mpsky`) at USDF. The service answers "which known solar system objects are
-in this (RA, Dec, radius, time)?" and is consumed by the prompt processing
-(PP) pipelines during the night to populate diasources and alerts.
+## What this service does and why it exists
 
-The system has two halves:
+Every night, the Rubin Observatory takes hundreds of images of the sky.
+Each image is processed within about 60 seconds by the **prompt processing
+(PP) pipeline**, which detects sources that have changed or moved since the
+last observation — these are called *difference-image sources*
+(**diasources**). Some of those diasources are genuinely new or interesting
+(supernovae, near-Earth asteroids on their first pass, etc.), and some are
+just known asteroids going about their predictable orbits.
 
-1. A **backend** that builds nightly ephemerides cache files from MPC orbits
-   using Sorcha — this repository, `mjuric/lsst-gen-ephemcache`
-   (branch `unpacked-desig`).
-2. A **service** that loads those caches and answers HTTP queries —
-   `mjuric/mpsky` (branch `auto-load`), deployed at USDF as a Phalanx Helm
-   app (`lsst-sqre/phalanx`, application `mpsky`).
+To tell the two apart, PP needs to answer a question for every diasource:
+**"Is there a known solar system object at this position in the sky, at
+this time?"** That's what this service provides. Given a sky coordinate
+(RA, Dec), a search radius, and a time, it returns the list of known solar
+system objects predicted to be there.
 
-Audience: USDF / SQuaRE SREs. Assumes familiarity with SLURM, Kubernetes,
-Argo CD, and Phalanx; minimal astronomy background required.
+An **ephemeris** (plural: *ephemerides*) is the predicted position of a
+celestial object at a given time, computed from its orbital elements. The
+Minor Planet Center (MPC) maintains a database of ~1.3 million known
+asteroid and comet orbits. This service propagates all of those orbits
+forward to the current observing night, pre-indexes the results for fast
+spatial lookup, and serves them over HTTP.
+
+### How it works: two halves
+
+The system is split into a heavy **batch backend** that runs once per day
+and a lightweight **query service** that runs continuously:
+
+1. **Backend (cache builder)** — this repository,
+   [`mjuric/lsst-gen-ephemcache`](https://github.com/mjuric/lsst-gen-ephemcache)
+   (branch `unpacked-desig`). Once a day, before the observing night
+   begins, a cron job on USDF:
+   - Pulls the latest orbital elements from the MPC database replica.
+   - Splits the ~1.3 million orbits into 100 chunks and fans them out as a
+     SLURM array job. Each task runs
+     [Sorcha](https://github.com/dirac-institute/sorcha), which propagates
+     the orbits forward and computes predicted positions.
+   - Collects the results and builds a single binary **cache file** — a
+     compact blob containing Chebyshev polynomial fits and a HEALPix
+     spatial index, optimised for fast cone-search queries.
+   - Places the cache on an HTTP-accessible filesystem so the service can
+     download it.
+
+   A full build takes roughly 30–60 minutes of wall-clock time.
+
+2. **Service (`mpsky`)** —
+   [`mjuric/mpsky`](https://github.com/mjuric/mpsky) (branch `auto-load`),
+   deployed as a Phalanx Kubernetes app
+   ([`lsst-sqre/phalanx`](https://github.com/lsst-sqre/phalanx),
+   application `mpsky`). The service:
+   - Polls the backend's HTTP directory every 60 seconds; when a new
+     night's cache appears, it downloads and loads it into memory.
+   - Answers queries in milliseconds — it's a read-only server whose only
+     job is to look things up in the pre-built cache.
+   - Is consumed by the PP pipeline (via the `mpsky-wrapper` library) and
+     can also be queried directly with `curl` or the `mpsky query` CLI.
+
+In short: all the expensive computation happens in the backend; the service
+is just a fast lookup layer.
+
+### Audience
+
+This runbook is for USDF / SQuaRE SREs. It assumes familiarity with SLURM,
+Kubernetes, Argo CD, and Phalanx; minimal astronomy background is required
+(the paragraphs above should suffice).
 
 ---
 
