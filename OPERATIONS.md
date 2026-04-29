@@ -134,6 +134,31 @@ Glossary
 
 ## 2. Backend: nightly cache builder at USDF
 
+The backend's job is to turn **orbital elements** into a **spatial lookup
+table** for one observing night. Think of it as a daily batch ETL:
+
+- **Input**: the `mpc_orbits` table in the MPC database replica — roughly
+  1.3 million rows, each describing the orbit of a known asteroid or comet
+  (semi-major axis, eccentricity, inclination, etc.). This table is
+  maintained upstream by the Minor Planet Center and replicated to USDF.
+- **Processing**: Sorcha (an orbit-propagation tool) takes each orbit and
+  computes where that object will be in the sky throughout the upcoming
+  night. The results are fit with Chebyshev polynomials (compact
+  approximations that allow sub-arcsecond interpolation at any moment
+  during the night) and indexed by HEALPix sky tile for fast spatial
+  queries.
+- **Output**: a single binary **cache file**
+  (`outputs/caches/eph.<MJD>.<date>.bin`, typically ~1–2 GB) placed on an
+  HTTP-accessible filesystem. Alongside it, a compressed snapshot of the
+  orbit catalog (`outputs/catalogs/mpc_orbits.<date>.sqlite.zst`) is saved
+  so the service can optionally return orbital elements with query results.
+
+If the backend fails or runs late, the service has no fresh cache for the
+night — it will keep retrying every 60 seconds until the file appears, but
+PP queries for that night will fail in the meantime. Getting the backend to
+run reliably before each night is the single most important operational
+concern.
+
 ### 2.1 Where it runs
 
 | Item                      | Value (USDF, today)                                                              |
@@ -319,6 +344,27 @@ script writes `.bin.tmp` and `mv`s into place).
 ---
 
 ## 3. Service: `mpsky` pod (Phalanx)
+
+The service is the read-only query layer that sits between the pre-built
+cache files and the prompt processing pipeline:
+
+- **Input**: the binary cache files produced by the backend, downloaded over
+  HTTP from the datastore. The service polls the datastore directory every
+  60 seconds and automatically picks up new nights as they appear. It also
+  downloads the companion orbit catalog (`.sqlite.zst`) so it can return
+  orbital elements when asked.
+- **Output**: an HTTP API. The primary endpoint is
+  `GET /ephemerides/?t=<MJD>&ra=<deg>&dec=<deg>&radius=<deg>`, which
+  returns an Apache Arrow table of every known solar system object predicted
+  to be within the search cone at time `t`. A typical query completes in a
+  few milliseconds. The prompt processing pipeline calls this endpoint for
+  every visit it processes during the night.
+
+The service itself does no orbit computation — it is purely a lookup server.
+If the pod restarts, it re-downloads the cache from the datastore (the
+on-disk cache in `/tmp` is an `emptyDir` that doesn't survive restarts).
+Memory is the main resource: each loaded night's cache occupies ~1–2 GB in
+RAM.
 
 ### 3.1 App identity
 
