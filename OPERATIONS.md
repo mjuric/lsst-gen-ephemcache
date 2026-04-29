@@ -326,6 +326,15 @@ queue is healthy.
 
 ### 2.7 Manually building a cache
 
+> **Caution — avoid this unless the cache is clearly corrupted or was never
+> produced.** If a cache file has already been served to the prompt
+> processing pipeline during the night, it was used for source association
+> — diasources were matched (or not matched) to solar system objects based
+> on the ephemerides in that file. Replacing it with a freshly built cache
+> could produce slightly different ephemerides (e.g. if orbits were updated
+> in the MPC database since the original build), creating an inconsistency
+> between already-processed and future visits from the same night.
+
 To force a rebuild for a specific night (for example, after a partial
 failure or to fill in a missed night):
 
