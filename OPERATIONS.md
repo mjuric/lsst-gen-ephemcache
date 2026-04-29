@@ -105,8 +105,7 @@ There are **two independent backend installs** producing caches:
 - **USDF backend** (the one ops will own). Runs on USDF SLURM. The cache is
   written **directly into the HTTP-served directory**
   (`/sdf/group/rubin/web_data/mpsky-data`), reachable at
-  `https://s3df.slac.stanford.edu/data/rubin/mpsky-data/`. There is **no
-  rsync step** at USDF; `EPHEM_RSYNC_TO` is unused here.
+  `https://s3df.slac.stanford.edu/data/rubin/mpsky-data/`.
 - **epyc backend** (legacy / parallel; for context only). A separate install
   of the same repo on `epyc.astro.washington.edu` running locally with GNU
   parallel (`KIND=parallel`), publishing to
@@ -202,7 +201,7 @@ sorcha bootstrap --cache sorcha_cache
 
 `~/.pgpass` is the only secret on this host. If the password rotates,
 update this file; the build will fail with "no password supplied"
-otherwise. There is no ssh key requirement at USDF (no rsync).
+otherwise.
 
 ### 2.3 The cron job
 
@@ -236,9 +235,7 @@ What the cron does, hour by hour:
    "skipping" and exits. This is why hourly is safe.
 3. Otherwise it calls `bin/compute-ephem-cache.sh <MJD> <date> 100` which
    runs the four pipeline stages described below.
-4. `EPHEM_RSYNC_TO` is **not set** in the USDF cron; the rsync branch is
-   inert here and exists for the epyc install / other deployments.
-5. All stdout/stderr is piped through `bin/clean-tqdm.py`, which strips
+4. All stdout/stderr is piped through `bin/clean-tqdm.py`, which strips
    `tqdm` progress bars and prefixes each emitted line with a UTC ISO-8601
    timestamp. `TQDM_DISABLE=1` reduces the volume tqdm produces in the
    first place. The cleaned stream is what lands in the cron mail to
