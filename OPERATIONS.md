@@ -75,6 +75,7 @@ Kubernetes, Argo CD, and Phalanx; minimal astronomy background is required
 3. [Service: `mpsky` pod (Phalanx)](#3-service-mpsky-pod-phalanx)
 4. [Routine tasks](#4-routine-tasks)
 5. [Reference](#5-reference)
+6. [Transfer checklist](#6-transfer-checklist)
 
 ---
 
@@ -729,20 +730,95 @@ backend hasn't yet built; the service retries every 60 s.
 
 ### 5.5 Known drift and follow-ups for ops
 
-These are items the runbook deliberately documents because the code/config
-doesn't match operational reality and should eventually be cleaned up:
+These items are tracked in the transfer checklist ([§6](#6-transfer-checklist)).
 
-- `install.sh` writes an `ephemcache.config` whose `MPCDB`, `SRUN`, and
-  `SBATCH` defaults do not match USDF reality (epyc DB, partition `roma`,
-  account `rubin:default@roma`). USDF uses the values in §2.2.
-- The Phalanx deployment hard-codes `--datastore
-  https://epyc.astro.washington.edu/~mjuric/mpsky-data` even though the
-  USDF backend writes to `https://s3df.slac.stanford.edu/data/rubin/mpsky-data/`.
-  This is the cutover described in §4.2.
-- `bin/exec-sorcha.sh` hard-codes `--mail-user=mjuric@uw.edu`. Once ops
-  takes over, change this to an ops mailbox.
-- The container image (`ghcr.io/mjuric/mpsky-daily:auto-load`) is built
-  manually with no version pinning and no CI. Migrating to a CI-built,
-  versioned image is recommended.
-- There are no Prometheus/Alertmanager alerts on the pod or on stale
-  caches. See §3.4 for suggested alerts.
+---
+
+## 6. Transfer checklist
+
+This section tracks everything that needs to happen to hand the service
+over from `mjuric` to the USDF operations team. Items are grouped by
+category; within each category they are roughly in priority order.
+
+### 6.1 Accounts and ownership
+
+- [ ] **Migrate the cron job to a shared / service account** on
+  `sdfcron001`. Today it runs under `mjuric`'s personal account. The new
+  account needs: a repo clone, a conda env, an `ephemcache.config` (§2.2),
+  `~/.pgpass` credentials, and a crontab entry (§2.3).
+- [ ] **Transfer `mjuric/lsst-gen-ephemcache`** to the `lsst-dm` GitHub
+  org.
+- [ ] **Fork `mjuric/mpsky`** to `lsst-dm` (upstream stays under `mjuric`
+  for development).
+- [ ] **Transfer the container image** from `ghcr.io/mjuric/mpsky-daily` to
+  LSST's ghcr organization. Update the Phalanx chart's `image.repository`
+  to match the new location.
+
+### 6.2 Configuration fixes
+
+These are things that are wrong or stale today and should be corrected as
+part of (or soon after) the transfer:
+
+- [ ] **Cut over the datastore URL** in the Phalanx deployment from the
+  epyc URL to the s3df URL. See [§4.2](#42-cut-over-the-datastore-url-epyc--s3df)
+  for the step-by-step procedure.
+- [ ] **Change `--mail-user=mjuric@uw.edu`** in `bin/exec-sorcha.sh` to an
+  ops mailbox.
+- [ ] **Change `MAILTO=mjuric@uw.edu`** in the crontab to an ops mailbox.
+- [ ] **Update `install.sh`** so the default `ephemcache.config` it
+  generates matches USDF reality (MPCDB, partition `torino`, account
+  `rubin:developers`), or document that the post-install override in §2.2
+  is the intended workflow.
+- [ ] **Update `install.sh`** line that clones `mjuric/mpsky` to point to
+  the `lsst-dm` fork (once §6.1 is done).
+
+### 6.3 CI/CD and image build
+
+- [ ] **Set up CI** to build a versioned, reproducible container image. The
+  current manual `make build` / `make push` workflow is fragile and not
+  reproducible (no version pins, no lockfile).
+- [ ] **Pin the image tag** in the Phalanx values to a versioned tag
+  instead of the mutable `auto-load` tag with `pullPolicy: Always`.
+
+### 6.4 Monitoring and alerting
+
+- [ ] **Create Prometheus / Alertmanager alerts.** There are none today.
+  Suggested alerts (see also §3.4):
+  - No cache for tonight's night MJD by T+90 min after the cron should
+    have produced it (page).
+  - Pod restart loop / `OOMKilled`.
+  - `ImagePullBackOff` from the container registry.
+  - `/version` returns non-200 from an in-cluster prober.
+
+### 6.5 Production deployment
+
+- [ ] **Create `values-usdfprod.yaml`** in Phalanx (see §4.4 for the full
+  checklist).
+- [ ] **Set explicit `resources.requests` and `resources.limits`** for the
+  pod (currently empty in the chart).
+- [ ] **Register a prod DNS hostname** (analogous to
+  `usdf-mpsky.sdf.slac.stanford.edu`).
+- [ ] **Confirm the NetworkPolicy** allows prompt-processing pods in prod
+  (they must carry the `gafaelfawr.lsst.io/ingress: "true"` label).
+
+### 6.6 Code improvements (developer)
+
+These are changes the developer(s) should make to reduce operational
+friction:
+
+- [ ] **Merge feature branches to `main`**: `unpacked-desig` → `main`
+  (backend) and `auto-load` → `main` (service). Running from non-default
+  branches is confusing and error-prone for ops.
+- [ ] **Reconcile the two night-MJD definitions** (17:00 Santiago in the
+  backend vs. UTC midnight in the service) to eliminate the edge-case
+  mismatch described in §5.3.
+- [ ] **Add a health / readiness endpoint** to `mpsky` that reports whether
+  the current night's cache is loaded. Today the only liveness probe is
+  `GET /` which returns `{"Hello": "World"}` regardless of cache state.
+
+### 6.7 Data management
+
+- [ ] **Establish a backup strategy** for cache files and catalogs on the
+  datastore (`/sdf/group/rubin/web_data/mpsky-data/`). These files are
+  provenance records — they document exactly which ephemerides were used for
+  source association on each night — and should be kept indefinitely.
