@@ -277,14 +277,23 @@ exec-sorcha.sh   →  sbatch --array=0-99 ...   (Sorcha + HDF5 conversion;
 mpsky build      →  outputs/caches/eph.<MJD>.<date>.bin.tmp  →  .bin
 ```
 
-SLURM resource expectations:
+SLURM resource expectations — `compute-ephem-cache.sh` defines three
+helper functions (`xrun`, `xrun2`, `xbatch`) that wrap `srun`/`sbatch`
+with preset resource requests. Each pipeline stage is dispatched through
+one of them:
 
-- `xrun`: 32 GB memory single task — used for the catalog query and
-  prepare step.
-- `xrun2`: 64 GB, 64 cores — used for `mpsky build`.
-- `xbatch`: an array of 100 tasks, 4 GB each (set in `bin/exec-sorcha.sh`
-  via `#SBATCH --mem=4gb`). Currently `--mail-user=mjuric@uw.edu` is
-  hard-coded in that file; ops should override it (see §4.4).
+- **`xrun`** (`srun --mem=32G`): a single interactive SLURM task with
+  32 GB of memory. Used for `prepare-run.py` (splitting orbits into
+  chunks).
+- **`xrun2`** (`srun --mem=64G --cpus-per-task=64`): a single interactive
+  task with 64 GB and 64 cores. Used for `get-mpcorb.py` (database
+  extraction) and `mpsky build` (assembling the final cache file, which
+  is CPU-parallel).
+- **`xbatch`** (`sbatch --array=0-99 --wait`): a 100-element SLURM array
+  job. Each array task requests 4 GB (set in `bin/exec-sorcha.sh` via
+  `#SBATCH --mem=4gb`) and runs one Sorcha chunk. Currently
+  `--mail-user=mjuric@uw.edu` is hard-coded in that file; ops should
+  override it (see §4.4).
 
 A successful run takes on the order of 30–60 minutes wall-clock when the
 queue is healthy.
