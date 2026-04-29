@@ -141,9 +141,7 @@ Glossary
 | Cron host                 | `sdfcron001`                                                                     |
 | Cron user                 | `mjuric` (will move to a service / shared account when ops takes over)           |
 | Repo clone (active)       | `/sdf/home/m/mjuric/projects/github.com/mjuric/lsst-gen-ephemcache-dev`          |
-| Repo clone (inactive)     | `/sdf/home/m/mjuric/projects/github.com/mjuric/lsst-gen-ephemcache` (cron line commented out) |
 | Conda env (build)         | `lsst-gen-ephemcache` — managed via `micromamba`                                 |
-| Conda env (cron filter)   | `mpsky` at `/sdf/data/rubin/user/mjuric/micromamba/envs/mpsky` (used to run `bin/clean-tqdm.py`; reused because it has the same packages) |
 | MPC database              | `postgresql+psycopg2://rubin@172.24.5.71/mpc_sbn` (USDF-internal replica)        |
 | SLURM partition           | `torino`                                                                         |
 | SLURM account             | `rubin:developers`                                                               |
@@ -153,7 +151,7 @@ Glossary
 
 > **Note**: the repo's `install.sh` writes USDF-default-looking values into
 > `ephemcache.config` (`MPCDB=...epyc.astro.washington.edu...`,
-> `--account=rubin:default@roma`, partition `roma`) that are **wrong for
+> `--account=rubin:default@roma`, partition `roma`) that **need to be modified for
 > the USDF cluster as it operates today**. After `install.sh` you must
 > overwrite `ephemcache.config` with the values in [§2.2](#22-installing-or-reinstalling-the-backend).
 
