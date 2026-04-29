@@ -45,12 +45,6 @@ else
 	echo "$CACHEFN: cache for $MJD (with $TSTAMP MPCORB) found; skipping."
 fi
 
-# rsync somewhere, if EPHEM_RSYNC_TO is set
-if [[ ! -z "$EPHEM_RSYNC_TO" ]]; then 
-	echo "Rsyncing to data.mpsky.org ..."
-	rsync -avzq --no-perms --no-owner --no-group -e "ssh -i ~/.ssh/id_ed25519" --exclude _workdir/ ./outputs/ "$EPHEM_RSYNC_TO" && echo "done."
-fi
-
 # --- timing end ---
 end_epoch=$(date +%s)
 end_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
