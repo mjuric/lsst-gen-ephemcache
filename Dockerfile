@@ -61,3 +61,13 @@ RUN . /opt/conda/etc/profile.d/conda.sh && conda activate ephemcache \
  && mamba list --explicit > /app/build-manifest.conda.txt 2>/dev/null || true \
  && pip freeze > /app/build-manifest.pip.txt 2>/dev/null || true \
  && (cd /app/mpsky && git rev-parse HEAD > /app/build-manifest.mpsky-sha.txt) || true
+
+# NCORES is deliberately NOT defaulted here. The scripts fall back to nproc,
+# which reports the NODE's cpu count rather than the pod's cpu limit, and
+# stage 3 uses ~4 GB per parallel chunk — so an unset NCORES on a large node
+# oversubscribes and can OOM the pod. The CronJob must set it to match
+# resources.limits.cpu. `selftest` warns when it is unset.
+
+RUN chmod +x /app/bin/container-entrypoint.sh
+ENTRYPOINT ["/app/bin/container-entrypoint.sh"]
+CMD ["run"]

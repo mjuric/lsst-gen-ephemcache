@@ -16,6 +16,7 @@ mpsky/
 outputs/
 
 .git/
+.github/
 __pycache__/
 *.pyc
 build-manifest.*.txt
