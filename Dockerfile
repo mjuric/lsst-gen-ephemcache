@@ -35,6 +35,14 @@ COPY . /app
 #  2. install.sh constrains no versions at all, so a fresh solve picks the
 #     newest interpreter — Python 3.14 at time of writing, newer than this
 #     stack has been exercised against.
+#  3. pandas 3 makes Copy-on-Write mandatory, so arrays from `.values` are
+#     read-only. mpsky/core.py:124 does an in-place `t -= tmin` on one, which
+#     was legal under pandas 2 and now raises
+#         ValueError: output array is read-only
+#     killing `mpsky build` at stage 4 after the whole fan-out has completed.
+#     CoW cannot be disabled in pandas 3 — the opt-out was removed — so the
+#     version has to be held back. sorcha only asks for pandas>=2.0, so 2.x
+#     satisfies it. Tracked upstream for a proper fix in mpsky.
 #
 # Done as a pre-step rather than `install.sh || true` plus a repair, because a
 # `|| true` would mask real failures.
@@ -43,9 +51,21 @@ COPY . /app
 # that sorcha's download URLs can be adjusted first. Removing it here rather
 # than letting it run and fail is the only option: it is the LAST thing
 # install.sh does, so there is no later step to recover in.
-RUN sed -i 's/ zstandard --yes/ zstandard shapely "python<3.14" --yes/' install.sh \
+RUN sed -i 's/ zstandard --yes/ zstandard shapely "pandas<3" "python<3.14" --yes/' install.sh \
  && sed -i '/^sorcha bootstrap --cache sorcha_cache$/d' install.sh \
- && ! grep -q '^sorcha bootstrap' install.sh
+ && ! grep -q '^sorcha bootstrap' install.sh \
+ && sed -i 's/parallel --halt now,fail=1 --bar /parallel --halt now,fail=1 /' \
+      bin/compute-ephem-cache.sh \
+ && ! grep -q -- '--bar' bin/compute-ephem-cache.sh
+
+# GNU parallel's --bar renders its progress display to /dev/tty, which does not
+# exist in a pod, so every refresh spawns `sh` and fails with
+#   sh: 1: cannot open /dev/tty: No such device or address
+# once per update -- interleaved with fragments of the bar itself. Harmless (the
+# bar's shell is separate from the job shells, so --halt never sees it) but it
+# buries real errors in the pod log. Removed above, in the same spirit as the
+# repo's own bin/clean-tqdm.py, which exists to strip progress bars for exactly
+# this reason.
 
 # install.sh looks for micromamba; miniforge3 ships mamba.
 RUN MAMBA=mamba ./install.sh ephemcache
@@ -120,6 +140,34 @@ RUN . /opt/conda/etc/profile.d/conda.sh && conda activate ephemcache \
 # stage 3 uses ~4 GB per parallel chunk — so an unset NCORES on a large node
 # oversubscribes and can OOM the pod. The CronJob must set it to match
 # resources.limits.cpu. `selftest` warns when it is unset.
+
+# / is mode 555 and HOME is unset, so anything that expects a writable home
+# directory fails. matplotlib is the one that shows up in the logs --
+#   mkdir -p failed for path /.config/matplotlib: [Errno 13] Permission denied
+# once per sorcha chunk -- but it is a general problem, so point HOME somewhere
+# writable rather than special-casing one library. /tmp is mode 1777.
+ENV HOME=/tmp
+ENV MPLCONFIGDIR=/tmp/matplotlib
+
+# Silence two lines that sbpy provokes on every interpreter start -- 2 lines x
+# 100 sorcha chunks per run:
+#   WARNING: AstropyDeprecationWarning: The TestRunner class is deprecated ...
+#   WARNING: AstropyDeprecationWarning: The TestRunnerBase class is deprecated ...
+# Nothing is running tests. sbpy imports astropy.tests.runner, whose TestRunner
+# and TestRunnerBase classes carry @deprecated, and that decorator fires when the
+# class is DEFINED, i.e. at import. Verified: `import astropy` alone emits
+# nothing, `import sbpy` emits both.
+#
+# Matched on message prefix only. "The TestRunner" also prefixes
+# "The TestRunnerBase", so one filter covers both, and it deliberately does NOT
+# filter by category: suppressing AstropyDeprecationWarning wholesale would also
+# hide real deprecations from sorcha's numerics. Verified that unrelated
+# DeprecationWarnings and other AstropyDeprecationWarning text still appear.
+#
+# Naming the category here would also force an astropy import at every
+# interpreter startup just to resolve it, which is not worth it for a message
+# this specific.
+ENV PYTHONWARNINGS="ignore:The TestRunner"
 
 RUN chmod +x /app/bin/container-entrypoint.sh
 ENTRYPOINT ["/app/bin/container-entrypoint.sh"]
