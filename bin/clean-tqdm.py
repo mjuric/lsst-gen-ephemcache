@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """
-Clean cron/email logs that contain tqdm progress bars.
+Clean logs that contain tqdm progress bars.
 
 Adds:
 - ISO-8601 UTC timestamp prefix to every emitted line.
 
 Usage:
-  some_command 2>&1 | python -u bin/clean_tqdm_stream.py
+  some_command 2>&1 | python -u bin/clean-tqdm.py
+
+Streams: each line is emitted and flushed as soon as it is complete, rather
+than after stdin closes. That matters for both of its uses here. A cache build
+takes ~25 minutes, so buffering to EOF would show nothing at all until the run
+finished, and -- worse -- every timestamp would record when the filter drained
+its input rather than when the line was produced, making all several hundred of
+them very nearly identical.
 """
 
 from __future__ import annotations
 
+import codecs
 import datetime as dt
+import os
 import re
 import sys
 from typing import Optional
@@ -59,6 +68,7 @@ def emit(line: str) -> None:
     """Emit a cleaned line with timestamp."""
     ts = now_ts()
     sys.stdout.write(f"[{ts}]  {line}\n")
+    sys.stdout.flush()
 
 
 # ---------- cleaning helpers ----------
@@ -137,24 +147,51 @@ def main() -> int:
 
         clean_emit(raw_line)
 
-    data = sys.stdin.read()
-    data = data.replace("\r\n", "\n")
+    # Read incrementally rather than sys.stdin.read(): see the module docstring.
+    # os.read returns as soon as anything is available, where a text-mode
+    # read(n) would block until it had n characters.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    fd = sys.stdin.fileno()
 
-    buf = []
-    for ch in data:
-        if ch == "\r":
-            current.clear()
-        elif ch == "\n":
-            buf.append("".join(current) + "\n")
-            current.clear()
+    # A bare \r means tqdm is overwriting its line, so the partial content is
+    # discarded. A \r\n is just a line ending and the content must be kept, so
+    # \r cannot be acted on until the next character is known -- which may be in
+    # the next chunk, hence the flag rather than a lookahead.
+    pending_cr = False
+    eof = False
+
+    while not eof:
+        try:
+            data = os.read(fd, 65536)
+        except InterruptedError:
+            continue
+        if data:
+            text = decoder.decode(data)
         else:
-            current.append(ch)
+            text = decoder.decode(b"", final=True)
+            eof = True
 
+        for ch in text:
+            if pending_cr:
+                pending_cr = False
+                if ch == "\n":
+                    flush_line("".join(current) + "\n")
+                    current.clear()
+                    continue
+                current.clear()
+
+            if ch == "\r":
+                pending_cr = True
+            elif ch == "\n":
+                flush_line("".join(current) + "\n")
+                current.clear()
+            else:
+                current.append(ch)
+
+    if pending_cr:
+        current.clear()
     if current:
-        buf.append("".join(current) + "\n")
-
-    for raw in buf:
-        flush_line(raw)
+        flush_line("".join(current) + "\n")
 
     if pending_tqdm is not None:
         clean_emit(pending_tqdm)

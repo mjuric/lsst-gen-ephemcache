@@ -277,7 +277,31 @@ case "${1:-run}" in
 		selftest "$@"
 		;;
 	run)
-		exec ./bin/cron-compute-ephem-cache.sh
+		# Timestamp every line and collapse tqdm's progress bars, which are
+		# written with \r and would otherwise arrive as thousands of fragments.
+		#
+		# tee's target is /dev/null unless EPHEMCACHE_LOG_TO_FILE is set, so the
+		# pipeline is the same either way. Pod logs are collected centrally, so
+		# the file is a durable second copy rather than the only one.
+		log_target="/dev/null"
+		if [[ "${EPHEMCACHE_LOG_TO_FILE:-}" == "true" ]]; then
+			if mkdir -p outputs/logs 2>/dev/null; then
+				log_target="outputs/logs/$(date -u +%Y%m%dT%H%M%SZ).log"
+				echo "logging to $log_target"
+			else
+				echo "cannot create outputs/logs; continuing without a log file" >&2
+			fi
+		fi
+
+		./bin/cron-compute-ephem-cache.sh 2>&1 \
+			| python3 -u ./bin/clean-tqdm.py \
+			| tee -a "$log_target"
+
+		# The run's status, not tee's. tee succeeds even when the run fails, so
+		# without this a failed build would report success -- and CronJob
+		# failures are currently silent (no alerting), so nothing else would
+		# catch it.
+		exit "${PIPESTATUS[0]}"
 		;;
 	*)
 		exec "$@"

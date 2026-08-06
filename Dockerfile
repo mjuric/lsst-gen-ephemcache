@@ -68,7 +68,12 @@ RUN sed -i 's/ zstandard --yes/ zstandard shapely "pandas<3" "python<3.14" --yes
 # this reason.
 
 # install.sh looks for micromamba; miniforge3 ships mamba.
-RUN MAMBA=mamba ./install.sh ephemcache
+#
+# The clean must be in this same RUN. A later layer cannot shrink an earlier one,
+# so cleaning separately would leave the package cache in the image and merely
+# add a whiteout on top of it.
+RUN MAMBA=mamba ./install.sh ephemcache \
+ && conda clean -afy
 
 # Fetch the SPICE/JPL kernels and the observatory-code table, in their own
 # layer so a code change does not re-download ~780 MB.
@@ -168,6 +173,12 @@ ENV MPLCONFIGDIR=/tmp/matplotlib
 # interpreter startup just to resolve it, which is not worth it for a message
 # this specific.
 ENV PYTHONWARNINGS="ignore:The TestRunner"
+
+# stdout is a pipe rather than a tty in a pod, so Python block-buffers by
+# default and emits in 4-8 KB bursts. That defeats live log following and makes
+# the per-line timestamps added by bin/clean-tqdm.py record when the buffer was
+# flushed rather than when the line was produced.
+ENV PYTHONUNBUFFERED=1
 
 RUN chmod +x /app/bin/container-entrypoint.sh
 ENTRYPOINT ["/app/bin/container-entrypoint.sh"]
