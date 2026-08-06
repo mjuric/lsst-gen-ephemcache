@@ -53,6 +53,13 @@ RUN MAMBA=mamba ./install.sh ephemcache
 # Fetch the SPICE/JPL kernels and the observatory-code table, in their own
 # layer so a code change does not re-download ~780 MB.
 #
+# The chmod at the end is not cosmetic. pooch writes each download through a
+# temporary file with mode 600, and this build runs as root, so every kernel
+# lands root-owned and unreadable by anyone else. A non-root pod then fails with
+# "The JPL planet ephemeris file has not been found" -- which is a permission
+# denial wearing a missing-file error message. The previously deployed install
+# never hit this because it ran as the user who owned the files.
+#
 # The observatory-code table comes from a mirror rather than upstream.
 # sorcha defaults to
 #   https://minorplanetcenter.net/Extended_Files/obscodes_extended.json.gz
@@ -71,7 +78,9 @@ RUN . /opt/conda/etc/profile.d/conda.sh && conda activate ephemcache \
  && CFG="$(python -c 'import sorcha.utilities.sorchaConfigs as m; print(m.__file__)')" \
  && sed -i "s|https://minorplanetcenter.net/Extended_Files/obscodes_extended.json.gz|${OBSCODES_URL}|" "$CFG" \
  && grep -n 'obscodes_extended' "$CFG" \
- && sorcha bootstrap --cache sorcha_cache
+ && sorcha bootstrap --cache sorcha_cache \
+ && chmod -R a+rX sorcha_cache \
+ && ls -l sorcha_cache | head -3
 
 # ephemcache.config is meant to be edited after install.sh seeds it with a
 # default; in a container this Dockerfile is the editor. install.sh writes

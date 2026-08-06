@@ -41,6 +41,31 @@ selftest() {
 	[[ -f configs/eph.ini ]] && ok "configs/eph.ini present" || bad "configs/eph.ini missing"
 	if [[ -d sorcha_cache ]]; then
 		ok "sorcha_cache/ present ($(du -sh sorcha_cache 2>/dev/null | cut -f1))"
+
+		# Presence is not enough: pooch writes downloads through a mode-600
+		# temporary file, so as built they are readable only by the user that
+		# ran the build. A non-root pod then fails deep into a run with "The
+		# JPL planet ephemeris file has not been found", which is a permission
+		# denial wearing a missing-file message. Check readability, not
+		# existence — `du` above stats without opening anything.
+		local unreadable
+		unreadable=$(find sorcha_cache -type f ! -readable 2>/dev/null | wc -l)
+		if [[ "$unreadable" -eq 0 ]]; then
+			ok "all $(find sorcha_cache -type f | wc -l) kernels readable as uid $(id -u)"
+		else
+			bad "$unreadable file(s) in sorcha_cache unreadable as uid $(id -u) — sorcha will"
+			bad "      report them as missing. Needs chmod a+rX at build time."
+			find sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
+		fi
+
+		# The planetary ephemeris is the one the run dies on first, so name it.
+		for _k in linux_p1550p2650.440 de440s.bsp sb441-n16.bsp; do
+			if [[ -r "sorcha_cache/$_k" ]]; then
+				ok "$_k readable"
+			else
+				bad "$_k missing or unreadable — a real run will fail at sorcha-run"
+			fi
+		done
 	else
 		bad "sorcha_cache/ missing — sorcha bootstrap did not run or did not land here"
 	fi
