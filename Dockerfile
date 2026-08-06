@@ -47,10 +47,10 @@ COPY . /app
 # Done as a pre-step rather than `install.sh || true` plus a repair, because a
 # `|| true` would mask real failures.
 #
-# Also drop `sorcha bootstrap` from install.sh: the kernels are no longer baked
-# into the image at all, and are fetched by the entrypoint on first use instead.
-# Removing it here is the only option -- it is the LAST thing install.sh does, so
-# there is no later step in which to undo it.
+# Also drop `sorcha bootstrap` from install.sh and run it ourselves below, so
+# that sorcha's download URLs can be adjusted first. Removing it here rather
+# than letting it run and fail is the only option: it is the LAST thing
+# install.sh does, so there is no later step to recover in.
 RUN sed -i 's/ zstandard --yes/ zstandard shapely "pandas<3" "python<3.14" --yes/' install.sh \
  && sed -i '/^sorcha bootstrap --cache sorcha_cache$/d' install.sh \
  && ! grep -q '^sorcha bootstrap' install.sh \
@@ -70,32 +70,37 @@ RUN sed -i 's/ zstandard --yes/ zstandard shapely "pandas<3" "python<3.14" --yes
 # install.sh looks for micromamba; miniforge3 ships mamba.
 RUN MAMBA=mamba ./install.sh ephemcache
 
-# The kernels are NOT baked in. They live in a subdirectory of the mounted output
-# directory and are fetched on first use by the entrypoint, which keeps ~780 MB
-# out of the image. Only two places reference them and both are cwd-relative
-# (compute-ephem-cache.sh's -d test and exec-sorcha.sh's --ar), so a symlink is
-# enough and no script needs changing. It has to be made at build time because
-# /app is root-owned and the pod runs non-root; it dangles until the volume is
-# mounted, which is fine because nothing dereferences it before then.
+# Fetch the SPICE/JPL kernels and the observatory-code table, in their own
+# layer so a code change does not re-download ~780 MB.
 #
-# This reverses D4's "bake sorcha_cache into the image". The cost is hermeticity:
-# the kernels become mutable state outside the image, so "which kernels produced
-# this cache?" is no longer answerable from the image tag alone. The entrypoint
-# logs a kernel inventory on every run to compensate.
-RUN ln -s outputs/sorcha_cache /app/sorcha_cache
-
-# sorcha's observatory-code URL still has to be patched here rather than at
-# runtime, because the edit is to an installed module and /opt/conda is
-# root-owned. The Minor Planet Center refuses that file from datacenter address
-# ranges -- GitHub runners retry ~25 times and fail -- so it comes from a mirror
-# serving a byte-identical copy. The JPL/NAIF kernel URLs are left alone; those
-# fetch fine. `sorcha bootstrap` accepts no --config, so the module is the only
-# place this can be set. The grep records the effective URL in the build log.
+# The chmod at the end is not cosmetic. pooch writes each download through a
+# temporary file with mode 600, and this build runs as root, so every kernel
+# lands root-owned and unreadable by anyone else. A non-root pod then fails with
+# "The JPL planet ephemeris file has not been found" -- which is a permission
+# denial wearing a missing-file error message. The previously deployed install
+# never hit this because it ran as the user who owned the files.
+#
+# The observatory-code table comes from a mirror rather than upstream.
+# sorcha defaults to
+#   https://minorplanetcenter.net/Extended_Files/obscodes_extended.json.gz
+# which the Minor Planet Center appears to refuse from datacenter address
+# ranges: GitHub-hosted runners retry it ~25 times and fail, while the same
+# fetch succeeds from USDF. The mirror serves a byte-identical file (77299
+# bytes) and is reachable from CI. The JPL/NAIF kernel URLs are left alone —
+# those download from runners without trouble.
+#
+# `sorcha bootstrap` accepts no --config, so this default cannot be overridden
+# from a configuration file; the installed module has to be edited. The grep
+# both proves the substitution landed and records the effective URL in the
+# build log.
 ARG OBSCODES_URL=https://epyc.astro.washington.edu/~mjuric/obscodes_extended.json.gz
 RUN . /opt/conda/etc/profile.d/conda.sh && conda activate ephemcache \
  && CFG="$(python -c 'import sorcha.utilities.sorchaConfigs as m; print(m.__file__)')" \
  && sed -i "s|https://minorplanetcenter.net/Extended_Files/obscodes_extended.json.gz|${OBSCODES_URL}|" "$CFG" \
- && grep -n 'obscodes_extended' "$CFG"
+ && grep -n 'obscodes_extended' "$CFG" \
+ && sorcha bootstrap --cache sorcha_cache \
+ && chmod -R a+rX sorcha_cache \
+ && ls -l sorcha_cache | head -3
 
 # ephemcache.config is meant to be edited after install.sh seeds it with a
 # default; in a container this Dockerfile is the editor. install.sh writes

@@ -23,80 +23,6 @@ pass=0
 fail=0
 warn=0
 
-# ---------------------------------------------------------------- kernels ---
-
-# /app/sorcha_cache is a symlink to outputs/sorcha_cache, so the kernels live on
-# the mounted output volume rather than in the image. That keeps ~780 MB out of
-# every pull, at the cost of a one-off download the first time a volume is used.
-activate_env() {
-	[[ -f ephemcache.config ]] || return 1
-	# shellcheck disable=SC1091
-	. ./ephemcache.config
-	if [[ "${CONDA_DEFAULT_ENV:-}" != "${ENV:-}" ]]; then
-		# conda's shell hook is not `set -u` safe; it reads $PS1 unguarded.
-		set +u
-		eval "$(${MAMBA:-mamba} shell hook --shell bash)" 2>/dev/null
-		${MAMBA:-mamba} activate "$ENV" 2>/dev/null
-		set -u
-	fi
-	[[ "${CONDA_DEFAULT_ENV:-}" == "${ENV:-}" ]]
-}
-
-# The planetary ephemeris is the largest file and the one a run dies on first, so
-# use it as the marker for "the cache is usable" rather than merely present.
-kernels_present() {
-	[[ -r sorcha_cache/linux_p1550p2650.440 ]]
-}
-
-ensure_kernels() {
-	kernels_present && return 0
-
-	local real="outputs/sorcha_cache"    # what the sorcha_cache symlink points at
-	echo "sorcha_cache absent at $real — bootstrapping (~780 MB, one-off per volume)"
-
-	# Build in a temporary directory and move it into place, so that a second pod
-	# starting concurrently cannot observe or inherit a half-written kernel set.
-	# concurrencyPolicy: Forbid covers scheduled runs but not a manual Job racing
-	# one.
-	local tmp="${real}.incoming.$$"
-	rm -rf "$tmp"; mkdir -p "$tmp" || { echo "cannot create $tmp" >&2; return 1; }
-	if ! sorcha bootstrap --cache "$tmp"; then
-		echo "sorcha bootstrap failed" >&2; rm -rf "$tmp"; return 1
-	fi
-	# pooch writes each download through a mode-600 temp file; make them readable
-	# in case this pod's uid is ever not the one that reads them.
-	chmod -R a+rX "$tmp" 2>/dev/null || true
-
-	# `sorcha bootstrap` bakes the absolute path of the cache directory into
-	# meta_kernel.txt as SPICE's PATH_VALUES, so the staging name we just used
-	# would survive the move and FURNSH would fail on a directory that no longer
-	# exists. Repoint it at the final location before moving.
-	local meta="$tmp/meta_kernel.txt"
-	if [[ -f "$meta" ]]; then
-		local abs_real; abs_real="$(cd "$(dirname "$real")" && pwd)/$(basename "$real")"
-		sed -i "s|$(pwd)/${tmp}|${abs_real}|g; s|^\(PATH_VALUES *= *(\).*|\1'${abs_real}')|" "$meta"
-		grep -q "'${abs_real}'" "$meta" || {
-			echo "could not repoint PATH_VALUES in meta_kernel.txt" >&2
-			rm -rf "$tmp"; return 1
-		}
-	fi
-	if [[ -d "$real" ]]; then
-		echo "another process populated $real first — discarding ours"
-		rm -rf "$tmp"
-	else
-		mv "$tmp" "$real" || { echo "could not move $tmp into place" >&2; rm -rf "$tmp"; return 1; }
-	fi
-	kernels_present
-}
-
-# D4 used to pin the kernels by baking them into the image, so the image tag
-# answered "which physics produced this cache?". They now live on a mutable
-# volume, so record what was actually used on every run instead.
-log_kernel_inventory() {
-	echo "-- kernel inventory ($(readlink -f sorcha_cache 2>/dev/null)) --"
-	find sorcha_cache/ -maxdepth 1 -type f -printf '   %10s  %TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -k4
-}
-
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail+1)); }
 note() { printf '  WARN  %s\n' "$*"; warn=$((warn+1)); }
@@ -113,14 +39,8 @@ selftest() {
 	[[ -d bin ]]          && ok "bin/ present"          || bad "bin/ missing"
 	[[ -d configs ]]      && ok "configs/ present"      || bad "configs/ missing"
 	[[ -f configs/eph.ini ]] && ok "configs/eph.ini present" || bad "configs/eph.ini missing"
-	# The kernels are not in the image; they are fetched into the output volume on
-	# first use. Absent is therefore a normal state to report, not a failure — but
-	# when they ARE there, check they are usable rather than merely present.
-	if ! kernels_present; then
-		printf '  info  %s\n' "sorcha_cache/ not populated yet — \`run\` will bootstrap it"
-		printf '  info  %s\n' "      into $(readlink sorcha_cache 2>/dev/null || echo outputs/sorcha_cache) (~780 MB, one-off per volume)"
-	else
-		ok "sorcha_cache/ present ($(du -sh sorcha_cache/ 2>/dev/null | cut -f1))"
+	if [[ -d sorcha_cache ]]; then
+		ok "sorcha_cache/ present ($(du -sh sorcha_cache 2>/dev/null | cut -f1))"
 
 		# Presence is not enough: pooch writes downloads through a mode-600
 		# temporary file, so as built they are readable only by the user that
@@ -128,53 +48,21 @@ selftest() {
 		# JPL planet ephemeris file has not been found", which is a permission
 		# denial wearing a missing-file message. Check readability, not
 		# existence — `du` above stats without opening anything.
-		# -L: sorcha_cache is a symlink to outputs/sorcha_cache, and plain `find`
-		# does not descend into a symlinked directory. Without it this whole
-		# check enumerated nothing and reported "all 0 kernels readable" — a
-		# pass that verified nothing.
 		local total unreadable
-		total=$(find -L sorcha_cache -type f 2>/dev/null | wc -l)
-		unreadable=$(find -L sorcha_cache -type f ! -readable 2>/dev/null | wc -l)
+		total=$(find sorcha_cache -type f 2>/dev/null | wc -l)
+		unreadable=$(find sorcha_cache -type f ! -readable 2>/dev/null | wc -l)
 		if [[ "$total" -eq 0 ]]; then
-			# Never let an empty enumeration read as success, whatever the cause.
-			bad "enumerated 0 files under sorcha_cache/ although it exists — the"
-			bad "      readability check would be vacuous, so treat this as a failure"
+			# Never let an empty enumeration read as success. This check once
+			# passed vacuously — reporting "all 0 kernels readable" — while
+			# sorcha_cache was a symlink that plain `find` will not descend into.
+			bad "enumerated 0 files under sorcha_cache/ although it exists —"
+			bad "      the readability check would be vacuous, so fail instead"
 		elif [[ "$unreadable" -eq 0 ]]; then
 			ok "all $total kernels readable as uid $(id -u)"
 		else
 			bad "$unreadable of $total file(s) in sorcha_cache unreadable as uid $(id -u) —"
-			bad "      sorcha will report them as missing. The bootstrap should chmod a+rX."
-			find -L sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
-		fi
-
-		# Readable files are still not enough: `sorcha bootstrap` writes the
-		# absolute path of the directory it populated into meta_kernel.txt as
-		# SPICE's PATH_VALUES. If that path is stale — the bootstrap staged
-		# under a different name, or the cache was moved or copied — every
-		# file here is present and readable and the run still dies 31 s in
-		# with an opaque `furnsh_c --> FURNSH --> ZZLDKER`. Resolve it.
-		local meta="sorcha_cache/meta_kernel.txt" pv
-		if [[ ! -f "$meta" ]]; then
-			bad "sorcha_cache/meta_kernel.txt missing — SPICE has nothing to load"
-		else
-			pv=$(sed -n "s/^PATH_VALUES *= *( *'\([^']*\)'.*/\1/p" "$meta" | head -1)
-			if [[ -z "$pv" ]]; then
-				bad "no PATH_VALUES in meta_kernel.txt"
-			elif [[ ! -d "$pv" ]]; then
-				bad "meta_kernel.txt PATH_VALUES points at a missing directory:"
-				bad "      $pv"
-				bad "      SPICE will fail with furnsh_c --> FURNSH --> ZZLDKER."
-			else
-				local missing=0 k
-				while read -r k; do
-					[[ -r "${pv}/${k}" ]] || { missing=$((missing+1)); [[ $missing -le 3 ]] && bad "      kernel not readable: $k"; }
-				done < <(sed -n "s/^ *'\$A\/\([^']*\)'.*/\1/p" "$meta")
-				if [[ "$missing" -eq 0 ]]; then
-					ok "meta_kernel.txt resolves: PATH_VALUES + all KERNELS_TO_LOAD readable"
-				else
-					bad "$missing kernel(s) named in meta_kernel.txt not readable under $pv"
-				fi
-			fi
+			bad "      sorcha will report them as missing. Needs chmod a+rX at build time."
+			find sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
 		fi
 
 		# The planetary ephemeris is the one the run dies on first, so name it.
@@ -185,6 +73,8 @@ selftest() {
 				bad "$_k missing or unreadable — a real run will fail at sorcha-run"
 			fi
 		done
+	else
+		bad "sorcha_cache/ missing — sorcha bootstrap did not run or did not land here"
 	fi
 
 	echo
@@ -387,13 +277,6 @@ case "${1:-run}" in
 		selftest "$@"
 		;;
 	run)
-		# The kernels live on the output volume, not in the image, so make sure
-		# they are there before handing off. Activating the environment here is
-		# also free for the scripts, which skip their own activation when
-		# CONDA_DEFAULT_ENV already matches.
-		activate_env || { echo "could not activate the conda environment" >&2; exit 1; }
-		ensure_kernels || { echo "sorcha_cache unavailable; refusing to start" >&2; exit 1; }
-		log_kernel_inventory
 		exec ./bin/cron-compute-ephem-cache.sh
 		;;
 	*)
