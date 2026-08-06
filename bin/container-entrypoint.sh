@@ -157,31 +157,36 @@ selftest() {
 	echo "  info  versions: $(python -c 'import sys;print("python "+sys.version.split()[0])' 2>/dev/null)$(python -c 'import sorcha,numpy;print(", sorcha "+sorcha.__version__+", numpy "+numpy.__version__)' 2>/dev/null)"
 
 	echo
-	echo "-- outputs and scratch --"
-	if mkdir -p outputs/caches outputs/catalogs 2>/dev/null && [[ -w outputs ]]; then
-		ok "outputs/ writable ($(df -h outputs 2>/dev/null | awk 'NR==2{print $4" free on "$6}'))"
-	else
-		bad "outputs/ not writable — mount a scratch volume there"
-	fi
+	echo "-- output directory --"
+	# The scripts write here directly: this is both the working area and the
+	# published location, so a cache appears where consumers read it as soon as
+	# compute-ephem-cache.sh renames it into place. When a deployment mounts a
+	# shared filesystem here it is scoped to the output directory alone, so
+	# nothing this container does can reach the rest of that filesystem.
+	local outdir="${EPHEMCACHE_OUTPUT_DIR:-/app/outputs}"
+	if mkdir -p "$outdir/caches" "$outdir/catalogs" 2>/dev/null && [[ -w "$outdir" ]]; then
+		ok "$outdir writable ($(df -h "$outdir" 2>/dev/null | awk 'NR==2{print $4" free"}'))"
+		printf '  info  %s\n' "fstype $(stat -fc %T "$outdir" 2>/dev/null), $(ls -ldn "$outdir" | awk '{print $1, "uid="$3, "gid="$4}')"
 
-	echo
-	echo "-- published output directory --"
-	# Mounted only when the deployment provides it. When it is present it is
-	# already scoped to the output directory itself by the mount, so writing
-	# here cannot reach anything else on the underlying shared filesystem.
-	local outdir="${EPHEMCACHE_OUTPUT_DIR:-/output}"
-	if [[ -d "$outdir" ]]; then
-		ok "$outdir mounted"
-		printf '  info  %s\n' "$(ls -ldn "$outdir" | awk '{print $1, "uid="$3, "gid="$4}')"
+		# Is it actually a separate mount, or just the container's own layer?
+		# Same device as /app means nothing was mounted and any output would be
+		# discarded when the pod exits — which for `run` is silent data loss.
+		if [[ "$(stat -c %d /app 2>/dev/null)" == "$(stat -c %d "$outdir" 2>/dev/null)" ]]; then
+			note "$outdir is on the SAME filesystem as /app — nothing is mounted"
+			note "      there, so anything written would be lost with the pod."
+		else
+			ok "$outdir is a separate mount (output survives the pod)"
+		fi
+
 		local probe="$outdir/.selftest-$(hostname)-${RANDOM}"
 		if touch "$probe" 2>/dev/null; then
 			printf '  info  %s\n' "new files land as $(ls -ln "$probe" | awk '{print "uid="$3" gid="$4}')"
-			rm -f "$probe" && ok "$outdir writable (probe created and removed)"
+			rm -f "$probe" && ok "create and delete in $outdir both work"
 		else
-			bad "$outdir present but NOT writable as uid $(id -u) gid $(id -g)"
+			bad "$outdir not writable as uid $(id -u) gid $(id -g)"
 		fi
 	else
-		printf '  info  %s\n' "$outdir not mounted — output would stay on scratch"
+		bad "$outdir does not exist or is not writable — nothing can run"
 	fi
 
 	echo
