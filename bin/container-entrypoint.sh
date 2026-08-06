@@ -23,6 +23,66 @@ pass=0
 fail=0
 warn=0
 
+# ---------------------------------------------------------------- kernels ---
+
+# /app/sorcha_cache is a symlink to outputs/sorcha_cache, so the kernels live on
+# the mounted output volume rather than in the image. That keeps ~780 MB out of
+# every pull, at the cost of a one-off download the first time a volume is used.
+activate_env() {
+	[[ -f ephemcache.config ]] || return 1
+	# shellcheck disable=SC1091
+	. ./ephemcache.config
+	if [[ "${CONDA_DEFAULT_ENV:-}" != "${ENV:-}" ]]; then
+		# conda's shell hook is not `set -u` safe; it reads $PS1 unguarded.
+		set +u
+		eval "$(${MAMBA:-mamba} shell hook --shell bash)" 2>/dev/null
+		${MAMBA:-mamba} activate "$ENV" 2>/dev/null
+		set -u
+	fi
+	[[ "${CONDA_DEFAULT_ENV:-}" == "${ENV:-}" ]]
+}
+
+# The planetary ephemeris is the largest file and the one a run dies on first, so
+# use it as the marker for "the cache is usable" rather than merely present.
+kernels_present() {
+	[[ -r sorcha_cache/linux_p1550p2650.440 ]]
+}
+
+ensure_kernels() {
+	kernels_present && return 0
+
+	local real="outputs/sorcha_cache"    # what the sorcha_cache symlink points at
+	echo "sorcha_cache absent at $real — bootstrapping (~780 MB, one-off per volume)"
+
+	# Build in a temporary directory and move it into place, so that a second pod
+	# starting concurrently cannot observe or inherit a half-written kernel set.
+	# concurrencyPolicy: Forbid covers scheduled runs but not a manual Job racing
+	# one.
+	local tmp="${real}.incoming.$$"
+	rm -rf "$tmp"; mkdir -p "$tmp" || { echo "cannot create $tmp" >&2; return 1; }
+	if ! sorcha bootstrap --cache "$tmp"; then
+		echo "sorcha bootstrap failed" >&2; rm -rf "$tmp"; return 1
+	fi
+	# pooch writes each download through a mode-600 temp file; make them readable
+	# in case this pod's uid is ever not the one that reads them.
+	chmod -R a+rX "$tmp" 2>/dev/null || true
+	if [[ -d "$real" ]]; then
+		echo "another process populated $real first — discarding ours"
+		rm -rf "$tmp"
+	else
+		mv "$tmp" "$real" || { echo "could not move $tmp into place" >&2; rm -rf "$tmp"; return 1; }
+	fi
+	kernels_present
+}
+
+# D4 used to pin the kernels by baking them into the image, so the image tag
+# answered "which physics produced this cache?". They now live on a mutable
+# volume, so record what was actually used on every run instead.
+log_kernel_inventory() {
+	echo "-- kernel inventory ($(readlink -f sorcha_cache 2>/dev/null)) --"
+	find sorcha_cache/ -maxdepth 1 -type f -printf '   %10s  %TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -k4
+}
+
 ok()   { printf '  PASS  %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail+1)); }
 note() { printf '  WARN  %s\n' "$*"; warn=$((warn+1)); }
@@ -39,8 +99,14 @@ selftest() {
 	[[ -d bin ]]          && ok "bin/ present"          || bad "bin/ missing"
 	[[ -d configs ]]      && ok "configs/ present"      || bad "configs/ missing"
 	[[ -f configs/eph.ini ]] && ok "configs/eph.ini present" || bad "configs/eph.ini missing"
-	if [[ -d sorcha_cache ]]; then
-		ok "sorcha_cache/ present ($(du -sh sorcha_cache 2>/dev/null | cut -f1))"
+	# The kernels are not in the image; they are fetched into the output volume on
+	# first use. Absent is therefore a normal state to report, not a failure — but
+	# when they ARE there, check they are usable rather than merely present.
+	if ! kernels_present; then
+		printf '  info  %s\n' "sorcha_cache/ not populated yet — \`run\` will bootstrap it"
+		printf '  info  %s\n' "      into $(readlink sorcha_cache 2>/dev/null || echo outputs/sorcha_cache) (~780 MB, one-off per volume)"
+	else
+		ok "sorcha_cache/ present ($(du -sh sorcha_cache/ 2>/dev/null | cut -f1))"
 
 		# Presence is not enough: pooch writes downloads through a mode-600
 		# temporary file, so as built they are readable only by the user that
@@ -54,7 +120,7 @@ selftest() {
 			ok "all $(find sorcha_cache -type f | wc -l) kernels readable as uid $(id -u)"
 		else
 			bad "$unreadable file(s) in sorcha_cache unreadable as uid $(id -u) — sorcha will"
-			bad "      report them as missing. Needs chmod a+rX at build time."
+			bad "      report them as missing. The bootstrap should chmod a+rX."
 			find sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
 		fi
 
@@ -66,8 +132,6 @@ selftest() {
 				bad "$_k missing or unreadable — a real run will fail at sorcha-run"
 			fi
 		done
-	else
-		bad "sorcha_cache/ missing — sorcha bootstrap did not run or did not land here"
 	fi
 
 	echo
@@ -270,6 +334,13 @@ case "${1:-run}" in
 		selftest "$@"
 		;;
 	run)
+		# The kernels live on the output volume, not in the image, so make sure
+		# they are there before handing off. Activating the environment here is
+		# also free for the scripts, which skip their own activation when
+		# CONDA_DEFAULT_ENV already matches.
+		activate_env || { echo "could not activate the conda environment" >&2; exit 1; }
+		ensure_kernels || { echo "sorcha_cache unavailable; refusing to start" >&2; exit 1; }
+		log_kernel_inventory
 		exec ./bin/cron-compute-ephem-cache.sh
 		;;
 	*)

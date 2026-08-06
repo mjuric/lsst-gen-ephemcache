@@ -27,7 +27,7 @@ if [[ "$CONDA_DEFAULT_ENV" != "$ENV" ]]; then
 fi
 
 # quick sanity check, that we aren't missing tasks
-NFILES=$(ls -l outputs/_workdir/orbits-000*.csv | wc -l)
+NFILES=$(ls -1 outputs/_workdir/orbits-*.csv | wc -l)
 if [[ $NFILES -ne $SLURM_ARRAY_TASK_COUNT ]]; then
 	echo "sanity check failed: there are $NFILES input files, but $SLURM_ARRAY_TASK_COUNT scheduled jobs." 1>&2
 	exit -1

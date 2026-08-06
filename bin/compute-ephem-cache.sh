@@ -63,7 +63,11 @@ xbatch() {
 # 3. run sorcha
 # 4. run mpsky build to generate the caches
 
-rm -rf outputs/_workdir
+# Clear the contents rather than the directory itself: outputs/_workdir may be
+# a mount point, and rm -rf on one fails with EBUSY, which under `set -e` would
+# abort the run. -mindepth 1 also handles dotfiles and exits 0 when empty.
+mkdir -p outputs/_workdir
+find outputs/_workdir -mindepth 1 -delete
 
 xrun2           ./bin/get-mpcorb.py --db "$MPCDB" "$TSTAMP"
 xrun            ./bin/prepare-run.py --outdir outputs/_workdir "$MJD" outputs/catalogs/mpcorb-orbits.$TSTAMP.csv outputs/catalogs/mpcorb-colors.$TSTAMP.csv "$NCHUNKS"

@@ -40,7 +40,7 @@ echo "=== START ${start_iso} ==="
 CACHEFN="outputs/caches/eph.$MJD.$TSTAMP.bin"
 if [[ ! -f "$CACHEFN" ]]; then
 	echo "Computing ephem cache $CACHEFN"
-	time ./bin/compute-ephem-cache.sh "$MJD" "$TSTAMP" 100
+	time ./bin/compute-ephem-cache.sh "$MJD" "$TSTAMP" "${NCHUNKS:-100}"
 else
 	echo "$CACHEFN: cache for $MJD (with $TSTAMP MPCORB) found; skipping."
 fi
