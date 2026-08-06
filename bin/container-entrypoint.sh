@@ -128,14 +128,23 @@ selftest() {
 		# JPL planet ephemeris file has not been found", which is a permission
 		# denial wearing a missing-file message. Check readability, not
 		# existence — `du` above stats without opening anything.
-		local unreadable
-		unreadable=$(find sorcha_cache -type f ! -readable 2>/dev/null | wc -l)
-		if [[ "$unreadable" -eq 0 ]]; then
-			ok "all $(find sorcha_cache -type f | wc -l) kernels readable as uid $(id -u)"
+		# -L: sorcha_cache is a symlink to outputs/sorcha_cache, and plain `find`
+		# does not descend into a symlinked directory. Without it this whole
+		# check enumerated nothing and reported "all 0 kernels readable" — a
+		# pass that verified nothing.
+		local total unreadable
+		total=$(find -L sorcha_cache -type f 2>/dev/null | wc -l)
+		unreadable=$(find -L sorcha_cache -type f ! -readable 2>/dev/null | wc -l)
+		if [[ "$total" -eq 0 ]]; then
+			# Never let an empty enumeration read as success, whatever the cause.
+			bad "enumerated 0 files under sorcha_cache/ although it exists — the"
+			bad "      readability check would be vacuous, so treat this as a failure"
+		elif [[ "$unreadable" -eq 0 ]]; then
+			ok "all $total kernels readable as uid $(id -u)"
 		else
-			bad "$unreadable file(s) in sorcha_cache unreadable as uid $(id -u) — sorcha will"
-			bad "      report them as missing. The bootstrap should chmod a+rX."
-			find sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
+			bad "$unreadable of $total file(s) in sorcha_cache unreadable as uid $(id -u) —"
+			bad "      sorcha will report them as missing. The bootstrap should chmod a+rX."
+			find -L sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
 		fi
 
 		# Readable files are still not enough: `sorcha bootstrap` writes the
