@@ -27,7 +27,7 @@ RUN apt-get -o APT::Sandbox::User=root update \
 WORKDIR /app
 COPY . /app
 
-# Patch the in-image copy of install.sh before running it. Two problems:
+# Patch the in-image copy of install.sh before running it. Four problems:
 #
 #  1. conda-forge sorcha 1.2.0 does not declare shapely among its
 #     dependencies, but sorcha/modules/PPVisitsFootprintFilter.py imports it,
@@ -43,6 +43,20 @@ COPY . /app
 #     CoW cannot be disabled in pandas 3 — the opt-out was removed — so the
 #     version has to be held back. sorcha only asks for pandas>=2.0, so 2.x
 #     satisfies it. Tracked upstream for a proper fix in mpsky.
+#  4. install.sh clones mpsky with no ref, so the image tracks whatever `main`
+#     happens to be at build time. The mpsky service deployed at usdfdev runs
+#     9fd38d2 from the `auto-load` branch, which is NOT an ancestor of main --
+#     eight-plus commits exist only there. The two have already diverged far
+#     enough to be incompatible on the wire: a main-built client cannot parse
+#     the deployed service's /ephemerides response at all, failing in
+#     `ipc_read` with "Expected to read 1699226235 metadata bytes, but only
+#     read 13". Since this image *builds* the caches that service reads, it
+#     should be built from the same branch.
+#
+#     Still not pinned. `auto-load`'s tip is 9fd38d2 as of 2026-08-06, exactly
+#     what is deployed, but a branch tip moves; only the branch has changed, not
+#     the floating. A commit pin belongs with the rest of the version pinning
+#     (D16/D13).
 #
 # Done as a pre-step rather than `install.sh || true` plus a repair, because a
 # `|| true` would mask real failures.
@@ -54,6 +68,8 @@ COPY . /app
 RUN sed -i 's/ zstandard --yes/ zstandard shapely "pandas<3" "python<3.14" --yes/' install.sh \
  && sed -i '/^sorcha bootstrap --cache sorcha_cache$/d' install.sh \
  && ! grep -q '^sorcha bootstrap' install.sh \
+ && sed -i 's|^git clone https://github.com/mjuric/mpsky.git$|git clone -b auto-load https://github.com/mjuric/mpsky.git|' install.sh \
+ && grep -q '^git clone -b auto-load https://github.com/mjuric/mpsky.git$' install.sh \
  && sed -i 's/parallel --halt now,fail=1 --bar /parallel --halt now,fail=1 /' \
       bin/compute-ephem-cache.sh \
  && ! grep -q -- '--bar' bin/compute-ephem-cache.sh
