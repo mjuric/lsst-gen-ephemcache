@@ -66,6 +66,20 @@ ensure_kernels() {
 	# pooch writes each download through a mode-600 temp file; make them readable
 	# in case this pod's uid is ever not the one that reads them.
 	chmod -R a+rX "$tmp" 2>/dev/null || true
+
+	# `sorcha bootstrap` bakes the absolute path of the cache directory into
+	# meta_kernel.txt as SPICE's PATH_VALUES, so the staging name we just used
+	# would survive the move and FURNSH would fail on a directory that no longer
+	# exists. Repoint it at the final location before moving.
+	local meta="$tmp/meta_kernel.txt"
+	if [[ -f "$meta" ]]; then
+		local abs_real; abs_real="$(cd "$(dirname "$real")" && pwd)/$(basename "$real")"
+		sed -i "s|$(pwd)/${tmp}|${abs_real}|g; s|^\(PATH_VALUES *= *(\).*|\1'${abs_real}')|" "$meta"
+		grep -q "'${abs_real}'" "$meta" || {
+			echo "could not repoint PATH_VALUES in meta_kernel.txt" >&2
+			rm -rf "$tmp"; return 1
+		}
+	fi
 	if [[ -d "$real" ]]; then
 		echo "another process populated $real first — discarding ours"
 		rm -rf "$tmp"
@@ -122,6 +136,36 @@ selftest() {
 			bad "$unreadable file(s) in sorcha_cache unreadable as uid $(id -u) — sorcha will"
 			bad "      report them as missing. The bootstrap should chmod a+rX."
 			find sorcha_cache -type f ! -readable -printf '        %M %u %n %f\n' 2>/dev/null | head -4
+		fi
+
+		# Readable files are still not enough: `sorcha bootstrap` writes the
+		# absolute path of the directory it populated into meta_kernel.txt as
+		# SPICE's PATH_VALUES. If that path is stale — the bootstrap staged
+		# under a different name, or the cache was moved or copied — every
+		# file here is present and readable and the run still dies 31 s in
+		# with an opaque `furnsh_c --> FURNSH --> ZZLDKER`. Resolve it.
+		local meta="sorcha_cache/meta_kernel.txt" pv
+		if [[ ! -f "$meta" ]]; then
+			bad "sorcha_cache/meta_kernel.txt missing — SPICE has nothing to load"
+		else
+			pv=$(sed -n "s/^PATH_VALUES *= *( *'\([^']*\)'.*/\1/p" "$meta" | head -1)
+			if [[ -z "$pv" ]]; then
+				bad "no PATH_VALUES in meta_kernel.txt"
+			elif [[ ! -d "$pv" ]]; then
+				bad "meta_kernel.txt PATH_VALUES points at a missing directory:"
+				bad "      $pv"
+				bad "      SPICE will fail with furnsh_c --> FURNSH --> ZZLDKER."
+			else
+				local missing=0 k
+				while read -r k; do
+					[[ -r "${pv}/${k}" ]] || { missing=$((missing+1)); [[ $missing -le 3 ]] && bad "      kernel not readable: $k"; }
+				done < <(sed -n "s/^ *'\$A\/\([^']*\)'.*/\1/p" "$meta")
+				if [[ "$missing" -eq 0 ]]; then
+					ok "meta_kernel.txt resolves: PATH_VALUES + all KERNELS_TO_LOAD readable"
+				else
+					bad "$missing kernel(s) named in meta_kernel.txt not readable under $pv"
+				fi
+			fi
 		fi
 
 		# The planetary ephemeris is the one the run dies on first, so name it.
