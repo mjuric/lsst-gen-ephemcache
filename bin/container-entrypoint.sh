@@ -165,6 +165,26 @@ selftest() {
 	fi
 
 	echo
+	echo "-- published output directory --"
+	# Mounted only when the deployment provides it. When it is present it is
+	# already scoped to the output directory itself by the mount, so writing
+	# here cannot reach anything else on the underlying shared filesystem.
+	local outdir="${EPHEMCACHE_OUTPUT_DIR:-/output}"
+	if [[ -d "$outdir" ]]; then
+		ok "$outdir mounted"
+		printf '  info  %s\n' "$(ls -ldn "$outdir" | awk '{print $1, "uid="$3, "gid="$4}')"
+		local probe="$outdir/.selftest-$(hostname)-${RANDOM}"
+		if touch "$probe" 2>/dev/null; then
+			printf '  info  %s\n' "new files land as $(ls -ln "$probe" | awk '{print "uid="$3" gid="$4}')"
+			rm -f "$probe" && ok "$outdir writable (probe created and removed)"
+		else
+			bad "$outdir present but NOT writable as uid $(id -u) gid $(id -g)"
+		fi
+	else
+		printf '  info  %s\n' "$outdir not mounted — output would stay on scratch"
+	fi
+
+	echo
 	echo "-- parallelism --"
 	# nproc reports the NODE's cpu count, not the cgroup cpu limit, so the
 	# scripts' NCORES default will oversubscribe a limited pod. Stage 3 uses
