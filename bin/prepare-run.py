@@ -21,7 +21,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     nchunks = args.chunks
-    os.mkdir(args.outdir)
+    # exist_ok: under Kubernetes this directory is a mountpoint, so it always
+    # exists and can never be recreated. compute-ephem-cache.sh empties it
+    # rather than removing it.
+    os.makedirs(args.outdir, exist_ok=True)
 
     #
     # config setup
