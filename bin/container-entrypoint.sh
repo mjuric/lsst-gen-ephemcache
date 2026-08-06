@@ -86,13 +86,42 @@ selftest() {
 		[[ -n "${ENV:-}" ]]  && ok "ENV=$ENV"   || bad "ENV unset"
 		[[ "${KIND:-}" == "parallel" ]] && ok "KIND=parallel" \
 			|| bad "KIND=${KIND:-unset} — expected 'parallel' in a container"
+		# Parse the DSN without ever echoing it whole: it is the one string
+		# here that could carry a password.
+		#   postgresql+psycopg2://[user[:pass]@]host[:port]/database
+		local _auth _userinfo _dbhost
+		_auth="${MPCDB#*://}"; _auth="${_auth%%/*}"     # authority
+		_dbhost="${_auth##*@}"                          # host[:port]
+		_userinfo=""
+		[[ "$_auth" == *@* ]] && _userinfo="${_auth%@*}"
+
 		if [[ -z "${MPCDB:-}" ]]; then
 			bad "MPCDB unset"
 		elif [[ "$MPCDB" == *epyc.astro.washington.edu* ]]; then
-			bad "MPCDB points at epyc ($MPCDB) — the afterburner did not apply"
+			# Deliberately does NOT print $MPCDB — it may carry a password.
+			bad "MPCDB still points at epyc — the config was not rewritten"
+		elif [[ "$_userinfo" == *:* ]]; then
+			# A password in the DSN would reach argv, because
+			# compute-ephem-cache.sh passes it as `get-mpcorb.py --db "$MPCDB"`,
+			# and from there into any traceback that prints the command line.
+			# Credentials belong in PGUSER/PGPASSWORD.
+			bad "MPCDB embeds a password — move it to PGPASSWORD (it would leak via argv)"
 		else
-			# do not print credentials
-			ok "MPCDB set, host: $(sed -E 's|.*@([^/]*)/.*|\1|' <<<"$MPCDB")"
+			ok "MPCDB set, host: $_dbhost, no credentials in DSN"
+		fi
+
+		# Credentials come from libpq's environment. Report only whether they
+		# are present — never the values, and never their length.
+		if [[ -n "${PGUSER:-}" ]]; then
+			ok "PGUSER is set"
+		else
+			note "PGUSER unset — libpq will fall back to the OS user, which"
+			note "      has no database account. Needed before \`run\`."
+		fi
+		if [[ -n "${PGPASSWORD:-}" ]]; then
+			ok "PGPASSWORD is set"
+		else
+			note "PGPASSWORD unset — needed before \`run\`; harmless for selftest"
 		fi
 	else
 		bad "ephemcache.config missing — install.sh did not complete"
@@ -154,15 +183,25 @@ selftest() {
 		if [[ -z "${MPCDB:-}" ]]; then
 			bad "MPCDB unset, cannot test"
 		else
-			python - "$MPCDB" <<'PY' && ok "connected and queried mpc_orbits" || bad "database check failed (see above)"
-import sys
+			# The DSN is passed via the environment, not argv, and only the
+			# exception CLASS is reported. libpq error text routinely echoes
+			# the full connection info, so printing str(exception) here would
+			# put credentials in the pod log.
+			# MPCDB is sourced from ephemcache.config as a shell variable and is
+			# not exported, so it must be placed in the environment explicitly
+			# for this one command. Passing it as an argument instead would put
+			# the DSN in argv, which is what this whole arrangement avoids.
+			MPCDB="$MPCDB" python <<'PY' && ok "connected and queried mpc_orbits" || bad "database check failed"
+import os, sys
 from sqlalchemy import create_engine, text
 try:
-	e = create_engine(sys.argv[1])
+	e = create_engine(os.environ["MPCDB"])
 	with e.connect() as c:
 		c.execute(text("SELECT 1 FROM mpc_orbits LIMIT 1"))
 except Exception as ex:
-	print("       ", type(ex).__name__, str(ex).splitlines()[0][:200])
+	# Class name only. Deliberately not str(ex) — see above.
+	print(f"        failed with {type(ex).__module__}.{type(ex).__name__}")
+	print("        (message suppressed: libpq includes connection info in it)")
 	sys.exit(1)
 PY
 		fi

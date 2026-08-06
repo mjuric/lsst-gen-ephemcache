@@ -44,13 +44,28 @@ RUN sed -i 's/ zstandard --yes/ zstandard shapely "python<3.14" --yes/' install.
 # install.sh looks for micromamba; miniforge3 ships mamba.
 RUN MAMBA=mamba ./install.sh ephemcache
 
-# install.sh hardcodes epyc as the database:
+# ephemcache.config is meant to be edited after install.sh seeds it with a
+# default; in a container this Dockerfile is the editor. install.sh writes
 #   MPCDB='postgresql+psycopg2://sssc@epyc.astro.washington.edu/mpc_sbn'
-# bin/compute-ephem-cache.sh and bin/exec-sorcha.sh source this file, so left
-# alone the container would query epyc over the WAN with a credential we do
-# not provision. Default to the USDF-internal replica, overridable by env.
+# and bin/compute-ephem-cache.sh sources that file, so left alone the container
+# would query epyc over the WAN. Point it at the USDF-internal replica.
+#
+# NO USERNAME OR PASSWORD IN THE DSN, deliberately. Credentials come from
+# libpq's PGUSER/PGPASSWORD, which psycopg2 honours when the URL omits them.
+# That keeps the password out of the process arguments: compute-ephem-cache.sh
+# passes this value to get-mpcorb.py as `--db`, so a password embedded here
+# would sit in argv and in any traceback that prints it.
+#
+# Mind the form. "//172.24.5.71/mpc_sbn" parses to username=None, which is what
+# lets PGUSER apply. Adding an @ -- "//@172.24.5.71/mpc_sbn" -- instead yields
+# username='', an explicit empty user that overrides PGUSER. Verified with
+# sqlalchemy.engine.make_url.
+#
+# ${MPCDB:-...} keeps it overridable from the environment; install.sh's plain
+# assignment would otherwise clobber whatever the pod sets, because the config
+# is sourced after the environment is in place.
 RUN sed -i \
-      -e "s|^MPCDB=.*|MPCDB=\"\${MPCDB:-postgresql+psycopg2://rubin@172.24.5.71/mpc_sbn}\"|" \
+      -e "s|^MPCDB=.*|MPCDB=\"\${MPCDB:-postgresql+psycopg2://172.24.5.71/mpc_sbn}\"|" \
       ephemcache.config \
  && grep -nE '^MPCDB|^ENV=|^KIND=' ephemcache.config
 
